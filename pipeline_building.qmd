@@ -1,0 +1,416 @@
+---
+title: "Untitled"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+# load libraries
+library(tidyverse)
+library(googledrive)
+
+# source functions
+source("index_data_processing_functions.r")
+
+# authenticate google drive
+drive_auth()
+```
+
+https://drive.google.com/drive/u/0/folders/1MZxIPozLI_K6ietpjLzEM-ybJjGT-a48
+
+```{r}
+# Test function to get google files from drive
+temp_files <- get_logger_csvs_by_id("1MZxIPozLI_K6ietpjLzEM-ybJjGT-a48")
+
+# YES
+```
+
+```{r}
+# Test fuction to get google files for ALL loggers
+logger_files <- get_all_logger_csvs_by_id()
+
+# Gorg. 
+```
+
+
+```{r}
+source("index_data_processing_functions.r")
+```
+
+
+```{r}
+# Test cleaning function for each sensor type ----
+
+# PAR
+par_files <- logger_files |>
+  filter(sensor_type == "PAR") |>
+  distinct()
+df_par <- purrr::map_dfr(seq_len(nrow(par_files)), function(i) {
+  read_and_clean_logger_csv(par_files[i, ])
+})
+unique(df_par$site)
+range(df_par$datetime)
+
+# WL - kpa
+df_wl <- read_and_clean_logger_csv(logger_files[29, ])
+View(df_wl)
+
+# WL - psi
+df_wl2 <- read_and_clean_logger_csv(logger_files[32, ])
+View(df_wl2)
+
+# WL - both
+wl_files <- logger_files |>
+  filter(sensor_type == "WL") |>
+  distinct()
+
+df_wl <- purrr::map_dfr(seq_len(nrow(wl_files)), function(i) {
+  read_and_clean_logger_csv(wl_files[i, ])
+})
+
+unique(df_wl$site)
+range(df_wl$datetime)
+
+# TEMP
+df_temp <- read_and_clean_logger_csv(logger_files[73, ])
+
+temp_files <- logger_files |>
+  filter(sensor_type == "TEMP") |>
+  distinct()
+
+df_temp <- purrr::map_dfr(seq_len(nrow(temp_files)), function(i) {
+  read_and_clean_logger_csv(temp_files[i, ], metadata)
+})
+
+unique(df_temp$site)
+range(df_temp$datetime)
+
+
+# PH
+df_ph <- read_and_clean_logger_csv(logger_files[107, ])
+
+ph_files <- logger_files |>
+  filter(sensor_type == "pH") |>
+  distinct()
+
+df_ph <- purrr::map_dfr(seq_len(nrow(ph_files)), function(i) {
+  read_and_clean_logger_csv(ph_files[i, ])
+})
+
+unique(df_ph$site)
+range(df_ph$datetime)
+
+
+# DO
+df_do <- read_and_clean_logger_csv(do_files)
+View(df_do)
+
+do_files <- logger_files |>
+  filter(sensor_type == "DO") |>
+  distinct()
+
+df_do <- purrr::map_dfr(seq_len(nrow(do_files)), function(i) {
+  read_and_clean_logger_csv(do_files[i, ])
+})
+
+unique(df_do$site)
+
+# CON
+con_files <- logger_files |>
+  filter(sensor_type == "CON") |>
+  distinct()
+
+df_con <- purrr::map_dfr(seq_len(nrow(con_files)), function(i) {
+  read_and_clean_logger_csv(con_files[i, ], metadata)
+})
+
+unique(df_con$site)
+range(df_con$datetime)
+```
+
+```{r}
+
+library(janitor)
+# try the big guy
+please <- combine_all_logger_data()
+```
+
+
+```{r}
+all <- df_temp |>
+  full_join(df_ph, by = c("site", "datetime")) |>
+  full_join(df_do, by = c("site", "datetime")) |>
+  full_join(df_wl, by = c("site", "datetime")) |>
+  full_join(df_par, by = c("site", "datetime")) |>
+  full_join(df_con, by = c("site", "datetime"))
+```
+
+This is not giving what I want because... Some of these are at the surface and some are at the bottom. so im seeing what SEEM like duplicates but... Yeah. So I need to distinguish there before I joing everything. 
+
+I need to clean the metadata as a part of all of this. Alrighty!!!!!!!!!!!
+
+```{r}
+library(googlesheets4)
+
+metadata_raw <- read_sheet("https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098",
+                           sheet = " Deployments_IndexOnly",
+                           na = c("", "n/a", "#N/A"),
+                           col_types = "c")
+
+metadata <- metadata_raw |>
+  clean_names() |>
+  rename("site" = "x1",
+         "logger_id" = "nickname") |>
+  separate(relaunch_file_name_recovery_file_name,
+           into = c("relaunch_file_name", "recovery_file_name"),
+           sep = ",")
+
+metadata <- metadata |>
+  mutate(position = tolower(position),
+         logger_id = if_else(is.na(logger_id), 
+                             str_split(relaunch_file_name, "_", simplify = TRUE)[, 2],
+                             logger_id)) |>
+  filter(!(str_detect(site, "^20\\d{2}$"))) |>
+  mutate(site = tolower(site),
+         site = str_remove_all(site, "[^a-zA-Z0-9]")) |>
+  # dates
+  mutate(launch_date_office = parse_date_time(launch_date_office,
+                                              orders = c("ymd", "mdy")),
+         initial_deployment_date = parse_date_time(initial_deployment_date,
+                                                   orders = c("ymd", "mdy")),
+         initial_deployment_time = str_remove(initial_deployment_time, "^~\\s*"),
+         initial_deployment_time = parse_date_time(initial_deployment_time,
+                                                   orders = c("HM", "I:M p")),
+         # Combine deployment date and time
+         initial_deployment_datetime = case_when(
+           # if no date, datetime = NA
+           is.na(initial_deployment_date) ~ as.POSIXct(NA),
+           # if no time, use the date and fill 00:00:00 for time
+           is.na(initial_deployment_time) ~ ymd_hms(paste(as.Date(initial_deployment_date),
+                                                          "00:00:00")),
+           # otherwise, combine the two 
+           TRUE ~ ymd_hms(paste(as.Date(initial_deployment_date), 
+                                format(initial_deployment_time, "%H:%M:%S"))))) |>
+  relocate(initial_deployment_datetime, .after = initial_deployment_time)
+
+metadata <- metadata |>
+  mutate(relaunch_date = if_else(site == "edmonds" &
+                                   logger_id == "DO18" &
+                                   relaunch_date == "2025-04-02",
+                                 "2025-03-13",
+                                 relaunch_date),
+         relaunch_date = parse_date_time(relaunch_date,
+                                         orders = c("ymd", "mdy")))
+
+metadata <- metadata |>
+  mutate(relaunch_recovery_time = if_else(site == "edmonds" &
+                                            logger_id == "DO18" &
+                                            relaunch_date == "2025-04-02",
+                                          "9:30",
+                                          relaunch_recovery_time),
+         relaunch_recovery_time = parse_date_time(relaunch_recovery_time,
+                                                  orders = c("HM", "I:M p")))
+
+metadata <- metadata |>
+  mutate( 
+    # Combine relauch date and time
+    relaunch_recovery_datetime = case_when(
+      # if no date, datetime = NA
+      is.na(relaunch_date) ~ as.POSIXct(NA),
+      # if no time, use the date and fill 00:00:00 for time
+      is.na(relaunch_recovery_time) ~ ymd_hms(paste(as.Date(relaunch_date),
+                                                    "00:00:00")),
+      # otherwise, combine the two 
+      TRUE ~ ymd_hms(paste(as.Date(relaunch_date), 
+                           format(relaunch_recovery_time, "%H:%M:%S")))), 
+    .after = relaunch_recovery_time)
+
+metadata <- metadata |>
+  mutate(
+    # Relauch Deployment Datetime
+    relaunch_deployment_time = str_remove(relaunch_deployment_time, "^~\\s*"),
+    relaunch_deployment_time = parse_date_time(relaunch_deployment_time,
+                                               orders = c("HM", "I:M p", "I:M:S p")))
+
+metadata <- metadata |>
+  mutate(
+    relaunch_deployment_datetime = case_when(
+      # if no date, datetime = NA
+      is.na(relaunch_date) ~ as.POSIXct(NA),
+      # if no time, use the date and fill 00:00:00 for time
+      is.na(relaunch_deployment_time) ~ ymd_hms(paste(as.Date(relaunch_date),
+                                                      "00:00:00")),
+      # otherwise, combine the two 
+      TRUE ~ ymd_hms(paste(as.Date(relaunch_date), 
+                           format(relaunch_deployment_time, "%H:%M:%S")))), 
+    .after = relaunch_deployment_time)
+
+metadata <- metadata |>
+  mutate(relaunch_data_readout_date = parse_date_time(relaunch_data_readout_date,
+                                                      orders = c("ymd", "mdy")))
+
+metadata <- metadata |>
+  mutate(recovery_date = parse_date_time(recovery_date,
+                                         orders = c("ymd", "mdy")),
+         recovery_time = str_remove(recovery_time, "^~\\s*"),
+         recovery_time = parse_date_time(recovery_time,
+                                         orders = c("HM", "I:M p", "I:M:S p")),
+         data_readout_date = parse_date_time(data_readout_date,
+                                             orders = c("ymd", "mdy")))
+
+metadata <- metadata |>
+  separate(file_upload_date,
+           into = c("file_upload_date_1", "file_upload_date_2"),
+           sep = ",") |>
+  mutate(file_upload_date_1 = parse_date_time(file_upload_date_1,
+                                              orders = c("ymd", "mdy")),
+         file_upload_date_2 = parse_date_time(file_upload_date_2,
+                                              orders = c("ymd", "mdy")))
+```
+
+Assumptions:
+
+the relaunch date on this row is incorrect and should actually be 2025-03-13:
+Edmonds	BOTTOM	DO18	21556613	12/10/2024	2024-12-11	11:08	2025-04-02	Shuttle	9:30:00 AM @ 3-13	11:45:00 AM	2025-03-14				
+
+
+Streamline that metadata cleaning into a function:
+
+```{r}
+read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098",
+         sheet_name = " Deployments_IndexOnly"){
+  
+  # Read in metadata sheet from google drive
+  metadata_raw <- read_sheet(metadata_file_url,
+                             sheet = sheet_name,
+                             na = c("", "n/a", "#N/A"),
+                             col_types = "c")
+  
+  # Cleaning
+  metadata <- metadata_raw |>
+    clean_names() |>
+    # Rename nickname to logger_id to match logger file convention
+    rename("site" = "x1",
+           "logger_id" = "nickname") |>
+    separate(relaunch_file_name_recovery_file_name,
+             into = c("relaunch_file_name", "recovery_file_name"),
+             sep = ",") |>
+           # Make position consistently lowercase
+    mutate(position = tolower(position),
+           # If no logger_id in column, pull from filename
+           logger_id = if_else(is.na(logger_id), 
+                               str_split(relaunch_file_name, "_", simplify = TRUE)[, 2],
+                               logger_id)) |>
+    # Remove rows that are year seperators
+    filter(!(str_detect(site, "^20\\d{2}$"))) |>
+    # Make site name consistently lowercase with no spaces or puncuation
+    mutate(site = tolower(site),
+           site = str_remove_all(site, "[^a-zA-Z0-9]")) |>
+    # Dates
+    mutate(launch_date_office = parse_date_time(launch_date_office,
+                                                orders = c("ymd", "mdy")),
+           initial_deployment_date = parse_date_time(initial_deployment_date,
+                                                     orders = c("ymd", "mdy")),
+           initial_deployment_time = str_remove(initial_deployment_time, "^~\\s*"),
+           initial_deployment_time = parse_date_time(initial_deployment_time,
+                                                     orders = c("HM", "I:M p")),
+           # Combine deployment date and time
+           initial_deployment_datetime = case_when(
+             # if no date, datetime = NA
+             is.na(initial_deployment_date) ~ as.POSIXct(NA),
+             # if no time, use the date and fill 00:00:00 for time
+             is.na(initial_deployment_time) ~ ymd_hms(paste(as.Date(initial_deployment_date),
+                                                            "00:00:00")),
+             # otherwise, combine the two 
+             TRUE ~ ymd_hms(paste(as.Date(initial_deployment_date), 
+                                  format(initial_deployment_time, "%H:%M:%S"))))) |>
+    relocate(initial_deployment_datetime, .after = initial_deployment_time) |>
+    mutate(relaunch_date = if_else(site == "edmonds" &
+                                     logger_id == "DO18" &
+                                     relaunch_date == "2025-04-02",
+                                   "2025-03-13",
+                                   relaunch_date),
+           relaunch_date = parse_date_time(relaunch_date,
+                                           orders = c("ymd", "mdy"))) |>
+    mutate(relaunch_recovery_time = if_else(site == "edmonds" &
+                                              logger_id == "DO18" &
+                                              relaunch_date == "2025-04-02",
+                                            "9:30",
+                                            relaunch_recovery_time),
+           relaunch_recovery_time = parse_date_time(relaunch_recovery_time,
+                                                    orders = c("HM", "I:M p"))) |>
+    mutate( 
+      # Combine relauch date and time
+      relaunch_recovery_datetime = case_when(
+        # if no date, datetime = NA
+        is.na(relaunch_date) ~ as.POSIXct(NA),
+        # if no time, use the date and fill 00:00:00 for time
+        is.na(relaunch_recovery_time) ~ ymd_hms(paste(as.Date(relaunch_date),
+                                                      "00:00:00")),
+        # otherwise, combine the two 
+        TRUE ~ ymd_hms(paste(as.Date(relaunch_date), 
+                             format(relaunch_recovery_time, "%H:%M:%S")))), 
+      .after = relaunch_recovery_time) |>
+    mutate(
+      # Relauch Deployment Datetime
+      relaunch_deployment_time = str_remove(relaunch_deployment_time, "^~\\s*"),
+      relaunch_deployment_time = parse_date_time(relaunch_deployment_time,
+                                                 orders = c("HM", "I:M p", "I:M:S p"))) |>
+    mutate(
+      relaunch_deployment_datetime = case_when(
+        # if no date, datetime = NA
+        is.na(relaunch_date) ~ as.POSIXct(NA),
+        # if no time, use the date and fill 00:00:00 for time
+        is.na(relaunch_deployment_time) ~ ymd_hms(paste(as.Date(relaunch_date),
+                                                        "00:00:00")),
+        # otherwise, combine the two 
+        TRUE ~ ymd_hms(paste(as.Date(relaunch_date), 
+                             format(relaunch_deployment_time, "%H:%M:%S")))), 
+      .after = relaunch_deployment_time) |>
+    mutate(relaunch_data_readout_date = parse_date_time(relaunch_data_readout_date,
+                                                        orders = c("ymd", "mdy"))) |>
+    mutate(recovery_date = parse_date_time(recovery_date,
+                                           orders = c("ymd", "mdy")),
+           recovery_time = str_remove(recovery_time, "^~\\s*"),
+           recovery_time = parse_date_time(recovery_time,
+                                           orders = c("HM", "I:M p", "I:M:S p")),
+           data_readout_date = parse_date_time(data_readout_date,
+                                               orders = c("ymd", "mdy"))) |>
+    separate(file_upload_date,
+             into = c("file_upload_date_1", "file_upload_date_2"),
+             sep = ",") |>
+    mutate(file_upload_date_1 = parse_date_time(file_upload_date_1,
+                                                orders = c("ymd", "mdy")),
+           file_upload_date_2 = parse_date_time(file_upload_date_2,
+                                                orders = c("ymd", "mdy")))
+  
+  return(metadata)
+
+}
+
+```
+
+
+Test out metadata cleaning function
+```{r}
+metadata <- read_and_clean_metadata()
+
+
+
+position <- metadata$position[metadata$site == "jeffersonhead" &
+                                metadata$logger_id == "T2" &
+                                metadata$initial_deployment_date == as.Date("2023-01-20")]
+
+unique(metadata$site)
+unique(all$site)
+```
+
+
+
+
+
+
+
+
+
