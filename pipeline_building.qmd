@@ -8,7 +8,9 @@ editor_options:
 ```{r}
 # load libraries
 library(tidyverse)
+library(janitor)
 library(googledrive)
+library(googlesheets4)
 
 # source functions
 source("index_data_processing_functions.r")
@@ -31,6 +33,10 @@ temp_files <- get_logger_csvs_by_id("1MZxIPozLI_K6ietpjLzEM-ybJjGT-a48")
 logger_files <- get_all_logger_csvs_by_id()
 
 # Gorg. 
+
+
+# Grab and clean metadata
+metadata <- read_and_clean_metadata()
 ```
 
 
@@ -46,11 +52,22 @@ source("index_data_processing_functions.r")
 par_files <- logger_files |>
   filter(sensor_type == "PAR") |>
   distinct()
+
 df_par <- purrr::map_dfr(seq_len(nrow(par_files)), function(i) {
-  read_and_clean_logger_csv(par_files[i, ])
+  read_and_clean_logger_csv(par_files[i, ], metadata)
 })
+
 unique(df_par$site)
 range(df_par$datetime)
+
+# Edmonds PAR 15605 is actually PAR 3 bottom... ... But naming convention is different and throwing of the position assignment
+# Also jeffersonhead PAR6424 is PAR5 bottom
+
+
+df_par_na_pos <- df_par |>
+  filter(is.na(position))
+# Loggers to look into where position couldn't parse:
+unique(df_par_na_pos[,c('site','par_logger_id','position')])
 
 # WL - kpa
 df_wl <- read_and_clean_logger_csv(logger_files[29, ])
@@ -66,14 +83,21 @@ wl_files <- logger_files |>
   distinct()
 
 df_wl <- purrr::map_dfr(seq_len(nrow(wl_files)), function(i) {
-  read_and_clean_logger_csv(wl_files[i, ])
+  read_and_clean_logger_csv(wl_files[i, ], metadata)
 })
 
 unique(df_wl$site)
+# are vashon and pointvashon the same site?
 range(df_wl$datetime)
 
+df_wl_na_pos <- df_wl |>
+  filter(is.na(position))
+# Loggers to look into where position couldn't parse:
+unique(df_wl_na_pos[,c('site','wl_logger_id','position')])
+
+
 # TEMP
-df_temp <- read_and_clean_logger_csv(logger_files[73, ])
+df_temp <- read_and_clean_logger_csv(logger_files[296, ], metadata = metadata)
 
 temp_files <- logger_files |>
   filter(sensor_type == "TEMP") |>
@@ -86,6 +110,26 @@ df_temp <- purrr::map_dfr(seq_len(nrow(temp_files)), function(i) {
 unique(df_temp$site)
 range(df_temp$datetime)
 
+df_temp_na_pos <- df_temp |>
+  filter(is.na(position))
+# Loggers to look into where position couldn't parse:
+unique(df_temp_na_pos[,c('site','temp_logger_id','position')])
+
+library(plotly)
+
+ggplotly(df_temp |>
+  # filter(site == "jeffersonhead",
+  #        position == "surface",
+  #        year(datetime) == 2023) |>
+ggplot() +
+  geom_point(aes(x = datetime, y = temp_c, color = temp_logger_id), size = 0.1) +
+  facet_wrap(~site))
+
+# ok so... the filtering is not perfect. because some files are kinda weirdly duplicating each other 
+# but then are not mentioned in the metadata.. EX: Edmonds_T3_2024-04-03 is from 12/06/2023 12:45:00 to 06/18/2024 7:45:00
+# while Edmonds_T3_2023-12-14.csv is from 12/06/2023 12:45:00 to 04/03/2024 10:15:00. 
+# somehow in the metadata we will want to filter Edmonds_T3_2024-04-03 to actually start at 04/03/2023
+
 
 # PH
 df_ph <- read_and_clean_logger_csv(logger_files[107, ])
@@ -95,12 +139,16 @@ ph_files <- logger_files |>
   distinct()
 
 df_ph <- purrr::map_dfr(seq_len(nrow(ph_files)), function(i) {
-  read_and_clean_logger_csv(ph_files[i, ])
+  read_and_clean_logger_csv(ph_files[i, ], metadata)
 })
 
 unique(df_ph$site)
 range(df_ph$datetime)
 
+df_ph_na_pos <- df_ph |>
+  filter(is.na(position))
+# Loggers to look into where position couldn't parse:
+unique(df_ph_na_pos[,c('site','ph_logger_id','position')])
 
 # DO
 df_do <- read_and_clean_logger_csv(do_files)
@@ -111,10 +159,16 @@ do_files <- logger_files |>
   distinct()
 
 df_do <- purrr::map_dfr(seq_len(nrow(do_files)), function(i) {
-  read_and_clean_logger_csv(do_files[i, ])
+  read_and_clean_logger_csv(do_files[i, ], metadata)
 })
 
 unique(df_do$site)
+range(df_do$datetime)
+
+df_do_na_pos <- df_do |>
+  filter(is.na(position))
+# Loggers to look into where position couldn't parse:
+unique(df_do_na_pos[,c('site','do_logger_id','position')])
 
 # CON
 con_files <- logger_files |>
@@ -125,25 +179,25 @@ df_con <- purrr::map_dfr(seq_len(nrow(con_files)), function(i) {
   read_and_clean_logger_csv(con_files[i, ], metadata)
 })
 
+# What does the star mean on some site names?
+# Are vashon and point vashon the same?
+
 unique(df_con$site)
 range(df_con$datetime)
+
+df_con_na_pos <- df_con |>
+  filter(is.na(position))
+# Loggers to look into where position couldn't parse:
+unique(df_con_na_pos[,c('site','con_logger_id','position')])
 ```
-
-```{r}
-
-library(janitor)
-# try the big guy
-please <- combine_all_logger_data()
-```
-
 
 ```{r}
 all <- df_temp |>
-  full_join(df_ph, by = c("site", "datetime")) |>
-  full_join(df_do, by = c("site", "datetime")) |>
-  full_join(df_wl, by = c("site", "datetime")) |>
-  full_join(df_par, by = c("site", "datetime")) |>
-  full_join(df_con, by = c("site", "datetime"))
+  full_join(df_ph, by = c("site", "datetime", "position")) |>
+  full_join(df_do, by = c("site", "datetime", "position")) |>
+  full_join(df_wl, by = c("site", "datetime", "position")) |>
+  full_join(df_par, by = c("site", "datetime", "position")) |>
+  full_join(df_con, by = c("site", "datetime", "position"))
 ```
 
 This is not giving what I want because... Some of these are at the surface and some are at the bottom. so im seeing what SEEM like duplicates but... Yeah. So I need to distinguish there before I joing everything. 
@@ -151,7 +205,6 @@ This is not giving what I want because... Some of these are at the surface and s
 I need to clean the metadata as a part of all of this. Alrighty!!!!!!!!!!!
 
 ```{r}
-library(googlesheets4)
 
 metadata_raw <- read_sheet("https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098",
                            sheet = " Deployments_IndexOnly",
@@ -279,7 +332,7 @@ Streamline that metadata cleaning into a function:
 
 ```{r}
 read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098",
-         sheet_name = " Deployments_IndexOnly"){
+                                    sheet_name = " Deployments_IndexOnly"){
   
   # Read in metadata sheet from google drive
   metadata_raw <- read_sheet(metadata_file_url,
@@ -296,7 +349,7 @@ read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com
     separate(relaunch_file_name_recovery_file_name,
              into = c("relaunch_file_name", "recovery_file_name"),
              sep = ",") |>
-           # Make position consistently lowercase
+    # Make position consistently lowercase
     mutate(position = tolower(position),
            # If no logger_id in column, pull from filename
            logger_id = if_else(is.na(logger_id), 
@@ -386,7 +439,7 @@ read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com
                                                 orders = c("ymd", "mdy")))
   
   return(metadata)
-
+  
 }
 
 ```
@@ -407,8 +460,162 @@ unique(all$site)
 ```
 
 
+```{r}
+# attempt to filter out stuff from metadata... ... ... 
+# start with just Jefferson head temp for simplicity
+jh <- all |>
+  filter(site == "jeffersonhead") |>
+  select(c("site", "position", "temp_logger_id", "temp_c", "datetime")) |>
+  # add in missing times as NA to complete timeseries
+  group_by(site, position) |>
+  complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+  ungroup() |>
+  distinct() #|>
+#  filter(position == "surface")
+
+# I want to filter out datetime that:
+## starts before initial_deployment_datetime in metadata, 
+## is between relaunch_recovery_datetime and relaunch_deployment_datetime
+## is after recovery_datetime
+
+initial_deployment_date <- metadata$initial_deployment_datetime[
+  metadata$site == "edmonds" &
+    metadata$logger_id == "T11" &
+    metadata$initial_deployment_date == as.Date("2024-06-13")
+]
+relaunch_recovery_date <- metadata$relaunch_recovery_datetime[
+  metadata$site == "edmonds" &
+    metadata$logger_id == "T11" &
+    metadata$initial_deployment_date == as.Date("2024-06-13")
+]
+relaunch_deployment_date <- metadata$relaunch_deployment_datetime[
+  metadata$site == "edmonds" &
+    metadata$logger_id == "T11" &
+    metadata$initial_deployment_date == as.Date("2024-06-13")
+]
+recovery_date <- metadata$recovery_datetime[
+  metadata$site == "edmonds" &
+    metadata$logger_id == "T11" &
+    metadata$initial_deployment_date == as.Date("2024-06-13")
+]
 
 
+test_outofwater_filter <- df_temp |>
+  mutate(
+    temp_c = case_when(
+      datetime <= initial_deployment_date ~ NA_real_,
+      datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+      datetime >= recovery_date ~ NA_real_,
+      TRUE ~ temp_c
+    )
+  )
+
+
+
+ggplot(df_temp) +
+  geom_line(aes(x = datetime, y = temp_c, color = position))
+
+ggplot(test_outofwater_filter) +
+  geom_line(aes(x = datetime, y = temp_c, color = position))
+```
+
+Ok.... let's try the big guy
+
+
+```{r}
+please_lord <- update_logger_data()
+
+range(please_lord$datetime)
+unique(please_lord$site)
+
+# surface temp visual check
+please_lord |>
+  filter(position == "surface") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = temp_c, color = temp_logger_id), size = 0.1) +
+  facet_wrap(~site)
+
+# bottom ph
+please_lord |>
+  filter(position == "bottom") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
+  facet_wrap(~site)
+
+# surface do
+please_lord |>
+  filter(position == "surface") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  facet_wrap(~site)
+
+# bottom co
+please_lord |>
+  filter(position == "bottom") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  facet_wrap(~site) 
+
+# surface wl
+please_lord |>
+  filter(position == "surface") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = abs_pres_kpa, color = wl_logger_id), size = 0.1) +
+  facet_wrap(~site)
+# haha not a thing! duh
+
+# bottom wl
+please_lord |>
+  filter(position == "bottom") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = abs_pres_kpa, color = wl_logger_id), size = 0.1) +
+  facet_wrap(~site) 
+
+# surface par
+please_lord |>
+  filter(position == "surface") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = raw_integrating_light, color = par_logger_id), size = 0.1) +
+  facet_wrap(~site)
+# also not a thing! kinda thought not
+
+# bottom par (raw)
+please_lord |>
+  filter(position == "bottom") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = raw_integrating_light, color = par_logger_id), size = 0.1) +
+  facet_wrap(~site) 
+
+# bottom par (calibrated)
+please_lord |>
+  filter(position == "bottom") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = calibrated_integrating_light, color = par_logger_id), size = 0.1) +
+  facet_wrap(~site) 
+# urm calibrated is the same as raw?
+
+# surface con
+please_lord |>
+  filter(position == "surface") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
+  facet_wrap(~site)
+
+# bottom par (raw)
+please_lord |>
+  filter(position == "bottom") |>
+ggplot() +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
+  facet_wrap(~site) 
+```
+
+
+So glad that this is seemingly working so far! Next steps for me:
+- Find a way to validate this against some raw files.
+- Work on more ways to filter outliers
+- Would love to be able to update and grab new files without needing to re-process all of the old ones as well
+- Bring in temp from other instruments as well (do we want to include all?)
+- Re-order columns to make a bit more sense
 
 
 

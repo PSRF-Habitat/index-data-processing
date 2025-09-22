@@ -6,13 +6,11 @@
 #' @return A data frame of all .csv files found, with an added `sensor_type` column inhereted from subfolder name
 #'
 get_all_logger_csvs_by_id <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv") {
-  
   # Create a list to store drive's metadata for all .csv files found
   all_files <- list()
   
   # This function will look into each folder (TEMP, PH, etc.) and collect csvs
   crawl_folder <- function(folder_id) {
-    
     # List all items in the current folder
     items <- drive_ls(as_id(folder_id))
     
@@ -25,7 +23,6 @@ get_all_logger_csvs_by_id <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJj
     if (nrow(subfolders) > 0) {   # Proceed if we found subfolders
       # Loop through each subfolder
       for (i in seq_len(nrow(subfolders))) {
-        
         # Grab subfolder name and ID
         subfolder_name <- subfolders$name[i]
         subfolder_id   <- subfolders$id[i]
@@ -56,29 +53,38 @@ get_all_logger_csvs_by_id <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJj
 # Download and clean a logger CSV file from Google Drive ----
 #'
 #' @param file_row One row from get_all_logger_csvs_by_id() output
-#' @return A cleaned tibble with standardized columns
+#' @param metadata Metadata dataframee from read_and_clean_metadata()
+#' @return A cleaned logger CSV for one file
 read_and_clean_logger_csv <- function(file_row, metadata) {
   
   # Pull out file info ----
-  file_id <- file_row$id
-  file_name <- file_row$name
-  sensor_type <- tolower(file_row$sensor_type)
-  parts <- str_split(file_name, "_", simplify = TRUE)
-  site_name <- parts[1]
-  site_name <- tolower(str_remove_all(site_name, "[^a-zA-Z0-9]"))
-  if(site_name == "squaxinisland"){
-    site_name == "squaxin"
-  }
+  file_id <- file_row$id      # File ID for Google Drive API
+  file_name <- file_row$name  # File name
+  sensor_type <- tolower(file_row$sensor_type)  # Sensor type, to know how to proceed processing
   
+  # Grab info from file name
+  parts <- str_split(file_name, "_", simplify = TRUE)
+  # The first part is the site name
+  site_name <- parts[1]
+  site_name <- tolower(str_remove_all(site_name, "[^a-zA-Z0-9]")) # Make lowercase with no special characters
+  # Normalize Squaxin Island
+  if(site_name == "squaxinisland"){
+    site_name = "squaxin"
+  }
   print(paste("Site name:", site_name))
+  # The second part is the logger nickname = logger_id
   logger_id <- parts[2]
   print(paste("Logger Id:", logger_id))
+  # The third part is the deployment date (??? seems inconsistent, check with team!!) ----
   deployment_date <- parts[3]
-  deployment_date <- str_remove_all(deployment_date, regex(".csv", ignore_case = TRUE))
+  deployment_date <- str_remove_all(deployment_date, regex(".csv", ignore_case = TRUE))  # take out the .csv ending
   print(paste("Date deployed:", deployment_date))
-  position <- metadata$position[metadata$site == site_name &
+  
+  # Link to metadata to pull out position in water column using clues from file name
+  position <- metadata$position[metadata$site == site_name &  
                                   metadata$logger_id == logger_id &
                                   metadata$initial_deployment_date == as.Date(deployment_date)]
+  # If the deployment date didn't match initial_deployment_date in metadata, try relaunch_date
   if (length(position) == 0 || all(is.na(position))) {
     position <- metadata$position[
       metadata$site == site_name &
@@ -86,34 +92,138 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
         metadata$relaunch_date == as.Date(deployment_date)
     ]
   } 
-  
+  # If the deployment date didn't match relaunch_date in metadata, try launch_date_office
+  if (length(position) == 0 || all(is.na(position))) {
+    position <- metadata$position[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$launch_date_office == as.Date(deployment_date)
+    ]
+  } 
+  # If there are many positions found (rare), use the first non-NA match
   if (length(position) > 1) {
     warning(paste("Multiple positions found. Using the first non-NA. Matches:", paste(position, collapse = ", ")))
     position <- position[!is.na(position)][1]
   } 
-  
+  # If there is no position found, then it is likely not noted in metadata. 
   if (length(position) == 0) {
     warning(paste("No position found, defaulting to NA"))
     position <- NA
   }
-  
   print(paste("Position:", position))
+  
+  # Grab dates for filtering out-of-water time ----
+  # Initial deployment date
+  initial_deployment_date <- metadata$initial_deployment_datetime[
+    metadata$site == site_name &
+      metadata$logger_id == logger_id &
+      metadata$initial_deployment_date == as.Date(deployment_date)
+  ]
+  if (length(initial_deployment_date) == 0 || all(is.na(initial_deployment_date))) {
+    initial_deployment_date <- metadata$initial_deployment_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$relaunch_date == as.Date(deployment_date)
+    ]
+  }
+  if (length(initial_deployment_date) == 0 || all(is.na(initial_deployment_date))) {
+    initial_deployment_date <- metadata$initial_deployment_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$launch_date_office == as.Date(deployment_date)
+    ]
+  }
+  
+  # Relaunch recovery date
+  relaunch_recovery_date <- metadata$relaunch_recovery_datetime[
+    metadata$site == site_name &
+      metadata$logger_id == logger_id &
+      metadata$initial_deployment_date == as.Date(deployment_date)
+  ]
+  if (length(relaunch_recovery_date) == 0 || all(is.na(relaunch_recovery_date))) {
+    relaunch_recovery_date <- metadata$relaunch_recovery_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$relaunch_date == as.Date(deployment_date)
+    ]
+  }
+  if (length(relaunch_recovery_date) == 0 || all(is.na(relaunch_recovery_date))) {
+    relaunch_recovery_date <- metadata$relaunch_recovery_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$launch_date_office == as.Date(deployment_date)
+    ]
+  }
+  
+  # Relaunch deployment date
+  relaunch_deployment_date <- metadata$relaunch_deployment_datetime[
+    metadata$site == site_name &
+      metadata$logger_id == logger_id &
+      metadata$initial_deployment_date == as.Date(deployment_date)
+  ]
+  if (length(relaunch_deployment_date) == 0 || all(is.na(relaunch_deployment_date))) {
+    relaunch_deployment_date <- metadata$relaunch_deployment_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$relaunch_date == as.Date(deployment_date)
+    ]
+  }
+  if (length(relaunch_deployment_date) == 0 || all(is.na(relaunch_deployment_date))) {
+    relaunch_deployment_date <- metadata$relaunch_deployment_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$launch_date_office == as.Date(deployment_date)
+    ]
+  }
+  
+  # Recovery date
+  recovery_date <- metadata$recovery_datetime[
+    metadata$site == site_name &
+      metadata$logger_id == logger_id &
+      metadata$initial_deployment_date == as.Date(deployment_date)
+  ]
+  if (length(recovery_date) == 0 || all(is.na(recovery_date))) {
+    recovery_date <- metadata$recovery_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$relaunch_date == as.Date(deployment_date)
+    ]
+  }
+  if (length(recovery_date) == 0 || all(is.na(recovery_date))) {
+    recovery_date <- metadata$recovery_datetime[
+      metadata$site == site_name &
+        metadata$logger_id == logger_id &
+        metadata$launch_date_office == as.Date(deployment_date)
+    ]
+  }
+  
+  # Set NA for missing dates
+  if (length(relaunch_recovery_date) == 0) relaunch_recovery_date <- NA
+  if (length(relaunch_deployment_date) == 0) relaunch_deployment_date <- NA
+  if (length(recovery_date) == 0) recovery_date <- NA
+  if (length(initial_deployment_date) == 0) initial_deployment_date <- NA
+  
+  print(paste("Launch date:", initial_deployment_date))
+  print(paste("Re-launch recovery date:", relaunch_recovery_date))
+  print(paste("Re-launch deployment date:", relaunch_deployment_date))
+  print(paste("Recovery date:", recovery_date))
+  
   
   print(paste("Reading file:", file_name))
   print(paste("Sensor type:", sensor_type))
   
   # Download csv to temp file ----
   temp_path <- tempfile(fileext = ".csv")
-  if (length(file_id) != 1) {
+  if (length(file_id) != 1) {     # Error if there are duplicate files
     stop("drive_download() aborted: file_id is not unique.")
   }
-  
   drive_download(as_id(file_id), path = temp_path, overwrite = TRUE)
   print(paste("File downloaded to:", temp_path))
   
   ##### TEMP LOGGER #####
   if (sensor_type == "temp") {
     
+    # Read the first few lines and find the header row
     lines <- readLines(temp_path, n = 5)
     header_line <- which(
       sapply(lines, function(line) {
@@ -122,37 +232,63 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       })
     )[1]
     
+    # Fallback in case no header line is found
     if (is.na(header_line)) {
       print(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
-    
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     print(paste("Skipping", skip_n, "lines"))
     
+    # Read in the csv
     df <- suppressWarnings(read_csv(temp_path, skip = skip_n, show_col_types = FALSE))
     
+    # Check that the header row was correctly read in
     print("Columns detected:")
     print(names(df))
     
+    # Only keep the rows with actual data
     df <- df |>
       select(contains("date", ignore.case = TRUE),
              contains("temp", ignore.case = TRUE))
-    
+    # Check that the columns kept were correct
     print("Columns selected:")
     print(names(df))
     
     df <- df |>
+      # Rename selected columns
       setNames(c("datetime", "temp_c")) |>
-      mutate(site = site_name,
-             position = position,
-             temp_logger_id = logger_id,
+      mutate(site = site_name,             # Add site column
+             position = position,          # Position in water column
+             temp_logger_id = logger_id,   # Logger nickname (pulled from filename)
              .before = datetime) |>
+      # Make datetime column POSIXct class
       mutate(datetime = parse_date_time(datetime,
                                         orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
+      # Only keep rows where temp is not NA
       filter(!is.na(temp_c)) |>
+      # Remove identical rows
       distinct()
     
+    # Filtering out-of-water times 
+    df <- df |>
+      # Add in missing times as NA to complete timeseries
+      group_by(site, position) |>
+      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      ungroup() |>
+      mutate(
+        temp_c = case_when(
+          !is.na(initial_deployment_date) &
+          datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+          datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+          datetime >= recovery_date ~ NA_real_,
+          TRUE ~ temp_c
+        )
+      )
+    
     print(paste("Rows after filtering:", nrow(df)))
+    print(paste("Finished processing", file_name))
   }
   
   ##### PH LOGGER #####
@@ -169,7 +305,6 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     if (is.na(header_line)) {
       print(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
-    
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     print(paste("Skipping", skip_n, "lines"))
     
@@ -186,7 +321,6 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     
     # Check if a valid ph column was found
     has_ph_col <- !is.na(ph_col)
-    
     
     # Select the columns
     if (has_ph_col) {
@@ -215,6 +349,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
         pH = if (has_ph_col) pH else NA_real_,
         site = site_name,
         ph_logger_id = logger_id,
+        position = position,
         .before = datetime
       ) |>
       mutate(
@@ -222,6 +357,32 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       ) |>
       distinct()
     
+    # Filtering out-of-water times 
+    df <- df |>
+      # Add in missing times as NA to complete timeseries
+      group_by(site, position) |>
+      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      ungroup() |>
+      mutate(
+        pH = case_when(
+          !is.na(initial_deployment_date) &
+            datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+            datetime >= recovery_date ~ NA_real_,
+          TRUE ~ pH
+        ),
+        millivolts = case_when(
+          !is.na(initial_deployment_date) &
+            datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+            datetime >= recovery_date ~ NA_real_,
+          TRUE ~ millivolts
+        )
+      )
     
     print(paste("Rows after cleaning:", nrow(df)))
   }
@@ -240,7 +401,6 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     if (is.na(header_line)) {
       print(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
-    
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     print(paste("Skipping", skip_n, "lines"))
     
@@ -254,6 +414,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     print(paste("Pressure column:", pres_col))
     print(paste("Datetime column:", datetime_col))
     
+    # Detect unit
     unit <- case_when(
       str_detect(pres_col, "psi") ~ "psi",
       str_detect(pres_col, "k.?pa") ~ "kpa",
@@ -275,11 +436,30 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     df <- df |>
       mutate(site = site_name,
              wl_logger_id = logger_id,
+             position = position,
              .before = datetime) |>
       mutate(datetime = parse_date_time(datetime,
                                         orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
       filter(!is.na(abs_pres_kpa)) |>
       distinct()
+    
+    # Filtering out-of-water times 
+    df <- df |>
+      # Add in missing times as NA to complete timeseries
+      group_by(site, position) |>
+      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      ungroup() |>
+      mutate(
+        abs_pres_kpa = case_when(
+          !is.na(initial_deployment_date) &
+            datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+            datetime >= recovery_date ~ NA_real_,
+          TRUE ~ abs_pres_kpa
+        )
+      )
     
     print(paste("Rows after filtering:", nrow(df)))
   }
@@ -298,7 +478,6 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     if (is.na(header_line)) {
       print(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
-    
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     print(paste("Skipping", skip_n, "lines"))
     
@@ -322,6 +501,24 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       filter(!is.na(high_range_microsiemens_per_cm)) |>
       distinct()
     
+    # Filtering out-of-water times 
+    df <- df |>
+      # Add in missing times as NA to complete timeseries
+      group_by(site, position) |>
+      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      ungroup() |>
+      mutate(
+        high_range_microsiemens_per_cm = case_when(
+          !is.na(initial_deployment_date) &
+            datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+            datetime >= recovery_date ~ NA_real_,
+          TRUE ~ high_range_microsiemens_per_cm
+        )
+      )
+    
     print(paste("Rows after filtering:", nrow(df)))
   }
   
@@ -339,7 +536,6 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     if (is.na(header_line)) {
       print(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
-    
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     print(paste("Skipping", skip_n, "lines"))
     
@@ -351,11 +547,30 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       setNames(c("datetime", "do_conc_mg_per_L")) |>
       mutate(site = site_name,
              do_logger_id = logger_id,
+             position = position,
              .before = datetime) |>
       mutate(datetime = parse_date_time(datetime,
                                         orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
       filter(!is.na(do_conc_mg_per_L)) |>
       distinct()
+    
+    # Filtering out-of-water times 
+    df <- df |>
+      # Add in missing times as NA to complete timeseries
+      group_by(site, position) |>
+      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      ungroup() |>
+      mutate(
+        do_conc_mg_per_L = case_when(
+          !is.na(initial_deployment_date) &
+            datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+            datetime >= recovery_date ~ NA_real_,
+          TRUE ~ do_conc_mg_per_L
+        )
+      )
     
     print(paste("Rows after filtering:", nrow(df)))
   }
@@ -395,11 +610,41 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       df <- df |>
         mutate(site = site_name,
                par_logger_id = logger_id,
+               position = position,
                .before = datetime) |>
         filter(!is.na(datetime)) |>
         distinct()
       print(paste("Rows after filtering:", nrow(df)))
     }
+    
+    # Filtering out-of-water times 
+    df <- df |>
+      # Add in missing times as NA to complete timeseries
+      group_by(site, position) |>
+      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      ungroup() |>
+      mutate(
+        raw_integrating_light = case_when(
+          !is.na(initial_deployment_date) &
+            datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+            datetime >= recovery_date ~ NA_real_,
+          TRUE ~ raw_integrating_light
+        ),
+        calibrated_integrating_light = case_when(
+          !is.na(initial_deployment_date) &
+            datetime <= initial_deployment_date ~ NA_real_,
+          !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+          !is.na(recovery_date) &
+            datetime >= recovery_date ~ NA_real_,
+          TRUE ~ calibrated_integrating_light
+        )
+      )
+    
+    
   }
   
   unlink(temp_path)
@@ -514,6 +759,17 @@ read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com
                                            orders = c("HM", "I:M p", "I:M:S p")),
            data_readout_date = parse_date_time(data_readout_date,
                                                orders = c("ymd", "mdy"))) |>
+    mutate(
+      recovery_datetime = case_when(
+        # if no date, datetime = NA
+        is.na(recovery_date) ~ as.POSIXct(NA),
+        # if no time, use the date and fill 00:00:00 for time
+        is.na(recovery_time) ~ ymd_hms(paste(as.Date(recovery_date),
+                                                        "00:00:00")),
+        # otherwise, combine the two 
+        TRUE ~ ymd_hms(paste(as.Date(recovery_date), 
+                             format(recovery_time, "%H:%M:%S")))), 
+      .after = recovery_time) |>
     separate(file_upload_date,
              into = c("file_upload_date_1", "file_upload_date_2"),
              sep = ",") |>
@@ -526,12 +782,18 @@ read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com
 }  # END metadata cleaning function ----
 
 
-# Putting it all together ----
-#' Crawl Drive, read and clean all logger CSVs, and return 1 combined tibble
+# Main function to process all data and create wide format CSV ----
+#'
+#' Crawl Drive, read and clean all logger CSVs, and combine into wide format
 #'
 #' @param root_folder_id The Google Drive folder ID containing sensor subfolders (TEMP, PH, etc.)
-#' @return A single tibble with all cleaned sensor data combined
-combine_all_logger_data <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv") {
+#' @param metadata_file_url URL to main index metadata google sheet
+#' @param sheet_name Name of the tab that the metadata is on
+#' @return A single tibble with all cleaned sensor data combined in wide format
+#'
+process_all_logger_data <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv",
+                                    metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098",
+                                    sheet_name = " Deployments_IndexOnly") {
   
   # 1. List out all logger files from drive
   message("Crawling Drive folder structure...")
@@ -542,17 +804,264 @@ combine_all_logger_data <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcS
     return(NULL)
   }
   
+  message(paste("Found", nrow(file_list), "CSV files"))
+  
   # 2. Retrieve and clean main metadata file
+  message("Reading and cleaning metadata...")
+  metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
   
- # metadata <- 
-  
-  # 3. Clean each file one-by-one and collect results
+  # 3. Clean each file one-by-one and collect results by sensor type
   message("Reading and cleaning each CSV file...")
-  all_cleaned <- purrr::map_dfr(seq_len(nrow(file_list)), function(i) {
-    read_and_clean_logger_csv(file_list[i, ])
-  })
   
-  return(all_cleaned)
+  # Initialize lists to store data by sensor type
+  temp_data <- list()
+  ph_data <- list()
+  do_data <- list()
+  wl_data <- list()
+  par_data <- list()
+  con_data <- list()
+  
+  # Process each file
+  for (i in seq_len(nrow(file_list))) {
+    file_row <- file_list[i, ]
+    sensor_type <- tolower(file_row$sensor_type)
+    
+    message(paste("Processing file", i, "of", nrow(file_list), ":", file_row$name))
+    
+    tryCatch({
+      cleaned_data <- read_and_clean_logger_csv(file_row, metadata)
+      
+      # Store in appropriate list based on sensor type
+      if (sensor_type == "temp") {
+        temp_data <- append(temp_data, list(cleaned_data))
+      } else if (sensor_type == "ph") {
+        ph_data <- append(ph_data, list(cleaned_data))
+      } else if (sensor_type == "do") {
+        do_data <- append(do_data, list(cleaned_data))
+      } else if (sensor_type == "wl") {
+        wl_data <- append(wl_data, list(cleaned_data))
+      } else if (sensor_type == "par") {
+        par_data <- append(par_data, list(cleaned_data))
+      } else if (sensor_type == "con") {
+        con_data <- append(con_data, list(cleaned_data))
+      } else {
+        warning(paste("Unknown sensor type:", sensor_type, "for file:", file_row$name))
+      }
+    }, error = function(e) {
+      warning(paste("Error processing file", file_row$name, ":", e$message))
+    })
+  }
+  
+  # 4. Combine data by sensor type
+  message("Combining data by sensor type...")
+  
+  df_temp <- if (length(temp_data) > 0) bind_rows(temp_data) else NULL
+  df_ph <- if (length(ph_data) > 0) bind_rows(ph_data) else NULL
+  df_do <- if (length(do_data) > 0) bind_rows(do_data) else NULL
+  df_wl <- if (length(wl_data) > 0) bind_rows(wl_data) else NULL
+  df_par <- if (length(par_data) > 0) bind_rows(par_data) else NULL
+  df_con <- if (length(con_data) > 0) bind_rows(con_data) else NULL
+  
+  # 5. Join all sensor types in wide format
+  message("Creating wide format dataset...")
+  
+  # Start with the first non-null dataset
+  all_data <- NULL
+  join_keys <- c("site", "datetime", "position")
+  
+  if (!is.null(df_temp)) {
+    all_data <- df_temp
+    message("Starting with temperature data")
+  }
+  
+  if (!is.null(df_ph)) {
+    if (is.null(all_data)) {
+      all_data <- df_ph
+      message("Starting with pH data")
+    } else {
+      all_data <- all_data |> full_join(df_ph, by = join_keys)
+      message("Added pH data")
+    }
+  }
+  
+  if (!is.null(df_do)) {
+    if (is.null(all_data)) {
+      all_data <- df_do
+      message("Starting with DO data")
+    } else {
+      all_data <- all_data |> full_join(df_do, by = join_keys)
+      message("Added DO data")
+    }
+  }
+  
+  if (!is.null(df_wl)) {
+    if (is.null(all_data)) {
+      all_data <- df_wl
+      message("Starting with water level data")
+    } else {
+      all_data <- all_data |> full_join(df_wl, by = join_keys)
+      message("Added water level data")
+    }
+  }
+  
+  if (!is.null(df_par)) {
+    if (is.null(all_data)) {
+      all_data <- df_par
+      message("Starting with PAR data")
+    } else {
+      all_data <- all_data |> full_join(df_par, by = join_keys)
+      message("Added PAR data")
+    }
+  }
+  
+  if (!is.null(df_con)) {
+    if (is.null(all_data)) {
+      all_data <- df_con
+      message("Starting with conductivity data")
+    } else {
+      all_data <- all_data |> full_join(df_con, by = join_keys)
+      message("Added conductivity data")
+    }
+  }
+  
+  if (is.null(all_data)) {
+    warning("No data was successfully processed")
+    return(NULL)
+  }
+  
+  # 6. Sort the final dataset
+  all_data <- all_data |>
+    arrange(site, position, datetime)
+  
+  # And arrange columns
+  all_data <- all_data[, c("site", "position", "datetime", 
+                           "temp_logger_id", "temp_c", 
+                           "ph_logger_id", "pH", "millivolts",
+                           "do_logger_id", "do_conc_mg_per_L", 
+                           "wl_logger_id", "abs_pres_kpa", 
+                           "par_logger_id", "raw_integrating_light", "calibrated_integrating_light", 
+                           "con_logger_id","high_range_microsiemens_per_cm")]
+    
+  
+  # 7. Data ready for return
+  
+  message(paste("Processing complete! Final dataset has", nrow(all_data), "rows and", ncol(all_data), "columns"))
+  
+  # Print summary of what was included
+  sensor_summary <- c()
+  if (!is.null(df_temp)) sensor_summary <- c(sensor_summary, "Temperature")
+  if (!is.null(df_ph)) sensor_summary <- c(sensor_summary, "pH")
+  if (!is.null(df_do)) sensor_summary <- c(sensor_summary, "Dissolved Oxygen")
+  if (!is.null(df_wl)) sensor_summary <- c(sensor_summary, "Water Level")
+  if (!is.null(df_par)) sensor_summary <- c(sensor_summary, "PAR")
+  if (!is.null(df_con)) sensor_summary <- c(sensor_summary, "Conductivity")
+  
+  message(paste("Sensor types included:", paste(sensor_summary, collapse = ", ")))
+  
+  # Print detailed summary by site, position, and sensor type
+  message("Sites, positions, and sensor data included:")
+  
+  # Create summary for each sensor type separately
+  sensor_summaries <- list()
+  
+  # Temperature data
+  if ("temp_c" %in% names(all_data)) {
+    temp_summary <- all_data |>
+      filter(!is.na(temp_c)) |>
+      group_by(site, position) |>
+      summarise(
+        sensor_type = "TEMP",
+        min_date = min(datetime, na.rm = TRUE),
+        max_date = max(datetime, na.rm = TRUE),
+        .groups = "drop"
+      )
+    sensor_summaries <- append(sensor_summaries, list(temp_summary))
+  }
+  
+  # pH data
+  if (any(c("pH", "millivolts") %in% names(all_data))) {
+    ph_summary <- all_data |>
+      filter(!is.na(pH) | !is.na(millivolts)) |>
+      group_by(site, position) |>
+      summarise(
+        sensor_type = "PH",
+        min_date = min(datetime, na.rm = TRUE),
+        max_date = max(datetime, na.rm = TRUE),
+        .groups = "drop"
+      )
+    sensor_summaries <- append(sensor_summaries, list(ph_summary))
+  }
+  
+  # DO data
+  if ("do_conc_mg_per_L" %in% names(all_data)) {
+    do_summary <- all_data |>
+      filter(!is.na(do_conc_mg_per_L)) |>
+      group_by(site, position) |>
+      summarise(
+        sensor_type = "DO",
+        min_date = min(datetime, na.rm = TRUE),
+        max_date = max(datetime, na.rm = TRUE),
+        .groups = "drop"
+      )
+    sensor_summaries <- append(sensor_summaries, list(do_summary))
+  }
+  
+  # Water level data
+  if ("abs_pres_kpa" %in% names(all_data)) {
+    wl_summary <- all_data |>
+      filter(!is.na(abs_pres_kpa)) |>
+      group_by(site, position) |>
+      summarise(
+        sensor_type = "WL",
+        min_date = min(datetime, na.rm = TRUE),
+        max_date = max(datetime, na.rm = TRUE),
+        .groups = "drop"
+      )
+    sensor_summaries <- append(sensor_summaries, list(wl_summary))
+  }
+  
+  # PAR data
+  if (any(c("raw_integrating_light", "calibrated_integrating_light") %in% names(all_data))) {
+    par_summary <- all_data |>
+      filter(!is.na(raw_integrating_light) | !is.na(calibrated_integrating_light)) |>
+      group_by(site, position) |>
+      summarise(
+        sensor_type = "PAR",
+        min_date = min(datetime, na.rm = TRUE),
+        max_date = max(datetime, na.rm = TRUE),
+        .groups = "drop"
+      )
+    sensor_summaries <- append(sensor_summaries, list(par_summary))
+  }
+  
+  # Conductivity data
+  if ("high_range_microsiemens_per_cm" %in% names(all_data)) {
+    con_summary <- all_data |>
+      filter(!is.na(high_range_microsiemens_per_cm)) |>
+      group_by(site, position) |>
+      summarise(
+        sensor_type = "CON",
+        min_date = min(datetime, na.rm = TRUE),
+        max_date = max(datetime, na.rm = TRUE),
+        .groups = "drop"
+      )
+    sensor_summaries <- append(sensor_summaries, list(con_summary))
+  }
+  
+  # Combine all summaries and sort
+  if (length(sensor_summaries) > 0) {
+    combined_summary <- bind_rows(sensor_summaries) |>
+      arrange(site, position, sensor_type)
+    
+    # Print each line
+    for (i in seq_len(nrow(combined_summary))) {
+      date_range <- paste(as.Date(combined_summary$min_date[i]), "to", as.Date(combined_summary$max_date[i]))
+      message(paste("  -", combined_summary$site[i], combined_summary$position[i], 
+                    paste0(combined_summary$sensor_type[i], ":"), date_range))
+    }
+  }
+  
+  return(all_data)
 }
 
 
