@@ -618,6 +618,10 @@ So glad that this is seemingly working so far! Next steps for me:
 - Re-order columns to make a bit more sense
 
 
+```{r}
+# save what I have for now - may be useful in data meeting tomorrow
+# write_rds(please_lord, "all_loggers.rds")
+```
 
 
 
