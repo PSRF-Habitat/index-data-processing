@@ -615,7 +615,7 @@ So glad that this is seemingly working so far! Next steps for me:
 - Work on more ways to filter outliers
 - Would love to be able to update and grab new files without needing to re-process all of the old ones as well
 - Bring in temp from other instruments as well (do we want to include all?)
-- Re-order columns to make a bit more sense
+
 
 
 ```{r}
@@ -624,4 +624,8 @@ So glad that this is seemingly working so far! Next steps for me:
 ```
 
 
+```{r}
+# Lets try the incremental function
+data <- update_logger_data_incremental()
+```
 

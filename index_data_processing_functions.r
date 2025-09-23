@@ -278,11 +278,11 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       mutate(
         temp_c = case_when(
           !is.na(initial_deployment_date) &
-          datetime <= initial_deployment_date ~ NA_real_,
+            datetime <= initial_deployment_date ~ NA_real_,
           !is.na(relaunch_recovery_date) & !is.na(relaunch_deployment_date) &
-          datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
+            datetime >= relaunch_recovery_date & datetime <= relaunch_deployment_date ~ NA_real_,
           !is.na(recovery_date) &
-          datetime >= recovery_date ~ NA_real_,
+            datetime >= recovery_date ~ NA_real_,
           TRUE ~ temp_c
         )
       )
@@ -765,7 +765,7 @@ read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com
         is.na(recovery_date) ~ as.POSIXct(NA),
         # if no time, use the date and fill 00:00:00 for time
         is.na(recovery_time) ~ ymd_hms(paste(as.Date(recovery_date),
-                                                        "00:00:00")),
+                                             "00:00:00")),
         # otherwise, combine the two 
         TRUE ~ ymd_hms(paste(as.Date(recovery_date), 
                              format(recovery_time, "%H:%M:%S")))), 
@@ -941,7 +941,7 @@ process_all_logger_data <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcS
                            "wl_logger_id", "abs_pres_kpa", 
                            "par_logger_id", "raw_integrating_light", "calibrated_integrating_light", 
                            "con_logger_id","high_range_microsiemens_per_cm")]
-    
+  
   
   # 7. Data ready for return
   
@@ -1064,4 +1064,335 @@ process_all_logger_data <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcS
   return(all_data)
 }
 
-
+# Incremental update function - only processes new files ----
+#'
+#' Updates logger data by only processing new/changed files since last update
+#'
+#' @param root_folder_id The Google Drive folder ID containing sensor subfolders
+#' @param metadata_file_url URL to main index metadata google sheet  
+#' @param sheet_name Name of the tab that the metadata is on
+#' @param existing_data_file Path to existing combined RDS data file
+#' @param tracking_file Path to file tracking what's been processed
+#' @param force_reprocess Logical, whether to reprocess all files (default FALSE). TRUE if you want to process all files in drive
+#' @return Updated combined logger data
+#'
+update_logger_data_incremental <- function(root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv",
+                                           metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098",
+                                           sheet_name = " Deployments_IndexOnly",
+                                           existing_data_file = "logger_data.rds",
+                                           tracking_file = "processed_files.rds",
+                                           force_reprocess = FALSE) {
+  
+  message("Starting incremental logger data update...")
+  
+  # 1. Load existing data if it exists
+  existing_data <- NULL
+  if (file.exists(existing_data_file) && !force_reprocess) {
+    message("Loading existing data...")
+    existing_data <- readRDS(existing_data_file)
+    message(paste("Existing data has", nrow(existing_data), "rows"))
+  }
+  
+  # 2. Get list of previously processed files
+  processed_files <- character(0)
+  # If both the file tracking file exists (data has been processed) AND we do not want to reprocess
+  if (file.exists(tracking_file) && !force_reprocess) {
+    # Load the tracking file
+    processed_files <- readRDS(tracking_file)
+    message(paste("Found", length(processed_files), "previously processed files"))
+  }
+  
+  # 3. Get current file list from Drive
+  message("Scanning Google Drive for files...")
+  all_files <- get_all_logger_csvs_by_id(root_folder_id)
+  
+  if (nrow(all_files) == 0) {
+    warning("No CSV files found in Drive folder")
+    return(existing_data)
+  }
+  
+  # 4. Identify new files to process
+  if (force_reprocess) {
+    files_to_process <- all_files # Process them all if we are reprocessing
+    message(paste("Force reprocess: will process all", nrow(files_to_process), "files"))
+  } else {
+    files_to_process <- all_files |>
+      filter(!(name %in% processed_files))  # Only process files whos name is not in file tracker
+    message(paste("Found", nrow(files_to_process), "new files to process"))
+  }
+  
+  # 5. If no new files, return existing data
+  if (nrow(files_to_process) == 0) {
+    message("No new files to process. Data is up to date! Horray!")
+    return(existing_data)
+  }
+  
+  # 6. Load metadata (always refresh this in case of updates)
+  message("Loading metadata...")
+  metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
+  
+  # 7. Process new files only
+  message(paste("Processing", nrow(files_to_process), "new files..."))
+  
+  # Initialize lists for new data by sensor type
+  new_temp_data <- list()
+  new_ph_data <- list()
+  new_do_data <- list()
+  new_wl_data <- list()
+  new_par_data <- list()
+  new_con_data <- list()
+  
+  # Process each new file
+  for (i in seq_len(nrow(files_to_process))) {
+    file_row <- files_to_process[i, ]
+    sensor_type <- tolower(file_row$sensor_type)
+    
+    message(paste("Processing new file", i, "of", nrow(files_to_process), ":", file_row$name))
+    
+    tryCatch({  # trying this new way of throwing warnings/errors
+      cleaned_data <- read_and_clean_logger_csv(file_row, metadata)
+      
+      # Store in appropriate list
+      if (sensor_type == "temp") {
+        new_temp_data <- append(new_temp_data, list(cleaned_data))
+      } else if (sensor_type == "ph") {
+        new_ph_data <- append(new_ph_data, list(cleaned_data))
+      } else if (sensor_type == "do") {
+        new_do_data <- append(new_do_data, list(cleaned_data))
+      } else if (sensor_type == "wl") {
+        new_wl_data <- append(new_wl_data, list(cleaned_data))
+      } else if (sensor_type == "par") {
+        new_par_data <- append(new_par_data, list(cleaned_data))
+      } else if (sensor_type == "con") {
+        new_con_data <- append(new_con_data, list(cleaned_data))
+      }
+    }, error = function(e) {
+      warning(paste("Error processing file", file_row$name, ":", e$message))
+    })
+  }
+  
+  # 8. Combine new data by sensor type
+  new_df_temp <- if (length(new_temp_data) > 0) bind_rows(new_temp_data) else NULL
+  new_df_ph <- if (length(new_ph_data) > 0) bind_rows(new_ph_data) else NULL
+  new_df_do <- if (length(new_do_data) > 0) bind_rows(new_do_data) else NULL
+  new_df_wl <- if (length(new_wl_data) > 0) bind_rows(new_wl_data) else NULL
+  new_df_par <- if (length(new_par_data) > 0) bind_rows(new_par_data) else NULL
+  new_df_con <- if (length(new_con_data) > 0) bind_rows(new_con_data) else NULL
+  
+  # 9. Combine with existing data
+  if (!is.null(existing_data)) {
+    message("Merging new data with existing data...")
+    
+    # For incremental updates, we'll remove any overlapping data and re-add
+    # Is this how we want to do this? Check with team!!
+    # This handles cases where files might have been updated with more recent data
+    # Note that they would need a new name.
+    
+    # Get site/position/date ranges from new data to remove from existing
+    sites_positions_to_update <- tibble()
+    
+    if (!is.null(new_df_temp)) {
+      temp_ranges <- new_df_temp |>
+        group_by(site, position) |>
+        summarise(min_date = min(datetime), max_date = max(datetime), .groups = "drop")
+      sites_positions_to_update <- bind_rows(sites_positions_to_update, temp_ranges)
+    }
+    
+    if (!is.null(new_df_ph)) {
+      ph_ranges <- new_df_ph |>
+        group_by(site, position) |>
+        summarise(min_date = min(datetime), max_date = max(datetime), .groups = "drop")
+      sites_positions_to_update <- bind_rows(sites_positions_to_update, ph_ranges)
+    }
+    
+    if (!is.null(new_df_do)) {
+      do_ranges <- new_df_do |>
+        group_by(site, position) |>
+        summarise(min_date = min(datetime), max_date = max(datetime), .groups = "drop")
+      sites_positions_to_update <- bind_rows(sites_positions_to_update, do_ranges)
+    }
+    
+    if (!is.null(new_df_wl)) {
+      wl_ranges <- new_df_wl |>
+        group_by(site, position) |>
+        summarise(min_date = min(datetime), max_date = max(datetime), .groups = "drop")
+      sites_positions_to_update <- bind_rows(sites_positions_to_update, wl_ranges)
+    }
+    
+    if (!is.null(new_df_par)) {
+      par_ranges <- new_df_par |>
+        group_by(site, position) |>
+        summarise(min_date = min(datetime), max_date = max(datetime), .groups = "drop")
+      sites_positions_to_update <- bind_rows(sites_positions_to_update, par_ranges)
+    }
+    
+    if (!is.null(new_df_con)) {
+      con_ranges <- new_df_con |>
+        group_by(site, position) |>
+        summarise(min_date = min(datetime), max_date = max(datetime), .groups = "drop")
+      sites_positions_to_update <- bind_rows(sites_positions_to_update, con_ranges)
+    }
+    
+    # Remove overlapping data from existing dataset. CHECK WITH TEAM ----
+    if (nrow(sites_positions_to_update) > 0) {
+      sites_positions_to_update <- sites_positions_to_update |>
+        group_by(site, position) |>
+        summarise(min_date = min(min_date), max_date = max(max_date), .groups = "drop")
+      
+      message("Removing overlapping data from existing dataset...")
+      
+      for (i in seq_len(nrow(sites_positions_to_update))) {
+        site_name <- sites_positions_to_update$site[i]
+        position_name <- sites_positions_to_update$position[i]
+        min_date <- sites_positions_to_update$min_date[i]
+        max_date <- sites_positions_to_update$max_date[i]
+        
+        existing_data <- existing_data |>
+          filter(!(site == site_name & position == position_name & 
+                     datetime >= min_date & datetime <= max_date))
+      }
+    }
+    
+    # Separate existing data by sensor type (if columns exist)
+    existing_temp <- if ("temp_c" %in% names(existing_data)) {
+      existing_data |> 
+        select(site, datetime, position, contains("temp_")) |> 
+        filter(!is.na(temp_c))
+    } else { NULL }
+    
+    existing_ph <- if (any(c("pH", "millivolts") %in% names(existing_data))) {
+      existing_data |> 
+        select(site, datetime, position, contains("ph_"), pH, millivolts) |> 
+        filter(!is.na(pH) | !is.na(millivolts))
+    } else { NULL }
+    
+    existing_do <- if ("do_conc_mg_per_L" %in% names(existing_data)) {
+      existing_data |> 
+        select(site, datetime, position, contains("do_")) |> 
+        filter(!is.na(do_conc_mg_per_L))
+    } else { NULL }
+    
+    existing_wl <- if ("abs_pres_kpa" %in% names(existing_data)) {
+      existing_data |> 
+        select(site, datetime, position, contains("wl_"), abs_pres_kpa) |> 
+        filter(!is.na(abs_pres_kpa))
+    } else { NULL }
+    
+    existing_par <- if (any(c("raw_integrating_light", "calibrated_integrating_light") %in% 
+                            names(existing_data))) {
+      existing_data |> 
+        select(site, datetime, position, contains("par_"), 
+               raw_integrating_light, calibrated_integrating_light) |> 
+        filter(!is.na(raw_integrating_light) | !is.na(calibrated_integrating_light))
+    } else { NULL }
+    
+    existing_con <- if ("high_range_microsiemens_per_cm" %in% names(existing_data)) {
+      existing_data |> 
+        select(site, datetime, position, contains("con_")) |> 
+        filter(!is.na(high_range_microsiemens_per_cm))
+    } else { NULL }
+    
+    # Combine existing with new data for each sensor type
+    df_temp <- bind_rows(existing_temp, new_df_temp)
+    df_ph <- bind_rows(existing_ph, new_df_ph) 
+    df_do <- bind_rows(existing_do, new_df_do)
+    df_wl <- bind_rows(existing_wl, new_df_wl)
+    df_par <- bind_rows(existing_par, new_df_par)
+    df_con <- bind_rows(existing_con, new_df_con)
+    
+  } else {
+    # No existing data, use new data as-is
+    df_temp <- new_df_temp
+    df_ph <- new_df_ph
+    df_do <- new_df_do
+    df_wl <- new_df_wl
+    df_par <- new_df_par
+    df_con <- new_df_con
+  }
+  
+  # 10. Create final wide format (same as original function)
+  message("Creating final wide format dataset...")
+  
+  all_data <- NULL
+  join_keys <- c("site", "datetime", "position")
+  
+  if (!is.null(df_temp)) {
+    all_data <- df_temp
+    message("Added temperature data")
+  }
+  
+  if (!is.null(df_ph)) {
+    if (is.null(all_data)) {
+      all_data <- df_ph
+      message("Starting with pH data")
+    } else {
+      all_data <- all_data |> full_join(df_ph, by = join_keys)
+      message("Added pH data")
+    }
+  }
+  
+  if (!is.null(df_do)) {
+    if (is.null(all_data)) {
+      all_data <- df_do
+      message("Starting with DO data")
+    } else {
+      all_data <- all_data |> full_join(df_do, by = join_keys)
+      message("Added DO data")
+    }
+  }
+  
+  if (!is.null(df_wl)) {
+    if (is.null(all_data)) {
+      all_data <- df_wl
+      message("Starting with water level data")
+    } else {
+      all_data <- all_data |> full_join(df_wl, by = join_keys)
+      message("Added water level data")
+    }
+  }
+  
+  if (!is.null(df_par)) {
+    if (is.null(all_data)) {
+      all_data <- df_par
+      message("Starting with PAR data")
+    } else {
+      all_data <- all_data |> full_join(df_par, by = join_keys)
+      message("Added PAR data")
+    }
+  }
+  
+  if (!is.null(df_con)) {
+    if (is.null(all_data)) {
+      all_data <- df_con
+      message("Starting with conductivity data")
+    } else {
+      all_data <- all_data |> full_join(df_con, by = join_keys)
+      message("Added conductivity data")
+    }
+  }
+  
+  if (is.null(all_data)) {
+    warning("No data was successfully processed")
+    return(existing_data)
+  }
+  
+  # Sort final dataset
+  all_data <- all_data |>
+    arrange(site, position, datetime) |>
+    distinct()  # Remove any duplicates
+  
+  # 11. Save updated data and tracking info
+  message("Saving updated data...")
+  saveRDS(all_data, existing_data_file)
+  
+  # Update processed files list
+  updated_processed_files <- unique(c(processed_files, files_to_process$name))
+  saveRDS(updated_processed_files, tracking_file)
+  
+  message(paste("Incremental update complete!"))
+  message(paste("Final dataset has", nrow(all_data), "rows and", ncol(all_data), "columns"))
+  message(paste("Processed", nrow(files_to_process), "new files"))
+  message(paste("Data saved to:", existing_data_file))
+  
+  return(all_data)
+}
