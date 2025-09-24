@@ -1,0 +1,102 @@
+---
+title: "Update Index Logger Data Main File"
+format: html
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+# Overview
+
+Use this script to update the main index site logger data file when new
+data becomes available.
+
+# Requirements
+
+## Drive Organization and File Naming
+
+Folder structure in Drive must match this format:
+
+```         
+.
+└── csvfiles/
+    ├── TEMP/
+    │   ├── SiteName_LoggerNickname_Deployment-date.csv
+    │   └── ex: SquaxinIsland_T4_2024-04-20.csv
+    ├── pH/
+    │   ├── SiteName_LoggerNickname_Deployment-date.csv
+    │   └── ex: Magnolia_PH11_2024-04-20.csv
+    ├── WL/
+    │   ├── SiteName_LoggerNickname_Deployment-date.csv
+    │   └── ex: PointVashon_WL3_2024-04-20.csv
+    └── ...etc
+```
+
+Here, the root folder is `csvfiles/`, with sub-folders corresponding to
+the sensor types.
+
+Within each sub-folder, each file to be processed needs to follow the
+naming convention: `SiteName_LoggerNickname_Deployment-date.csv`
+
+Where:
+
+-   `SiteName` is the full site name with each new word capitalized
+
+-   `LoggerNickname` is the nickname given to that specific instrument
+    in the metadata sheet
+
+-   `Deployment-date` in the format yyyy-mm-dd is EITHER:
+
+    -   Date deployed or
+
+    -   Date re-launched (whichever corresponds to the start of true
+        data in that file)
+
+-   File needs to end in `.csv`
+
+-   Each part is separated by an underscore `_`
+
+## Metadata sheet
+
+# Workflow
+
+## Step 1: Setup
+
+First we will load the necessary packages for processing. Run this code
+chunk before taking any other steps (you may need to install packages
+using `install.packages("package-name-here")` if you haven't done so
+already):
+
+```{r}
+# For interacting directly with Google Drive
+library(googledrive)
+library(googlesheets4)
+
+# For data cleaning and manipulation
+library(tidyverse)
+library(janitor)
+library(lubridate)
+
+# We also need to source our functions
+source("index_data_processing_functions.r")
+```
+
+If it is your first time connecting to the Google Drive API, you will
+need to authenticate your account. Run these two lines one by one and
+follow the instructions in your Console:
+
+```{r}
+# Authenticate with Google Drive (only need to do this once)
+drive_auth()
+gs4_auth()
+```
+
+## Step 2:
+
+Run the next few lines to update the kelp index site's logger data from
+the Google Drive
+
+```{r}
+# 
+data <- update_logger_data_incremental()
+```
