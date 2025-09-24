@@ -15,6 +15,9 @@ library(googlesheets4)
 # source functions
 source("index_data_processing_functions.r")
 
+data <- readRDS("logger_data.rds")
+files <- readRDS("processed_files.rds")
+
 # authenticate google drive
 drive_auth()
 ```
@@ -523,71 +526,55 @@ Ok.... let's try the big guy
 
 
 ```{r}
-please_lord <- update_logger_data()
-
-range(please_lord$datetime)
-unique(please_lord$site)
+range(data$datetime)
+unique(data$site)
 
 # surface temp visual check
-please_lord |>
+data |>
   filter(position == "surface") |>
 ggplot() +
   geom_point(aes(x = datetime, y = temp_c, color = temp_logger_id), size = 0.1) +
   facet_wrap(~site)
 
 # bottom ph
-please_lord |>
+data |>
   filter(position == "bottom") |>
 ggplot() +
   geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
   facet_wrap(~site)
 
 # surface do
-please_lord |>
+data |>
   filter(position == "surface") |>
 ggplot() +
   geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
   facet_wrap(~site)
 
 # bottom co
-please_lord |>
+data |>
   filter(position == "bottom") |>
 ggplot() +
   geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
   facet_wrap(~site) 
 
-# surface wl
-please_lord |>
-  filter(position == "surface") |>
-ggplot() +
-  geom_point(aes(x = datetime, y = abs_pres_kpa, color = wl_logger_id), size = 0.1) +
-  facet_wrap(~site)
-# haha not a thing! duh
 
 # bottom wl
-please_lord |>
+data |>
   filter(position == "bottom") |>
 ggplot() +
   geom_point(aes(x = datetime, y = abs_pres_kpa, color = wl_logger_id), size = 0.1) +
   facet_wrap(~site) 
 
-# surface par
-please_lord |>
-  filter(position == "surface") |>
-ggplot() +
-  geom_point(aes(x = datetime, y = raw_integrating_light, color = par_logger_id), size = 0.1) +
-  facet_wrap(~site)
-# also not a thing! kinda thought not
 
 # bottom par (raw)
-please_lord |>
+data |>
   filter(position == "bottom") |>
 ggplot() +
   geom_point(aes(x = datetime, y = raw_integrating_light, color = par_logger_id), size = 0.1) +
   facet_wrap(~site) 
 
 # bottom par (calibrated)
-please_lord |>
+data |>
   filter(position == "bottom") |>
 ggplot() +
   geom_point(aes(x = datetime, y = calibrated_integrating_light, color = par_logger_id), size = 0.1) +
@@ -595,14 +582,14 @@ ggplot() +
 # urm calibrated is the same as raw?
 
 # surface con
-please_lord |>
+data |>
   filter(position == "surface") |>
 ggplot() +
   geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
   facet_wrap(~site)
 
 # bottom par (raw)
-please_lord |>
+data |>
   filter(position == "bottom") |>
 ggplot() +
   geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
@@ -613,7 +600,7 @@ ggplot() +
 So glad that this is seemingly working so far! Next steps for me:
 - Find a way to validate this against some raw files.
 - Work on more ways to filter outliers
-- Would love to be able to update and grab new files without needing to re-process all of the old ones as well
+- Would love to be able to update and grab new files without needing to re-process all of the old ones as well (GOT IT!!)
 - Bring in temp from other instruments as well (do we want to include all?)
 
 
@@ -628,4 +615,40 @@ So glad that this is seemingly working so far! Next steps for me:
 # Lets try the incremental function
 data <- update_logger_data_incremental()
 ```
+
+
+---
+
+Manually check a few files that we suspect are duplicates in the drive:
+```{r}
+ed_ph_1 <- read_csv(here::here("data", "Edmonds_pH5_2023-01-20.csv"))
+ed_ph_2 <- read_csv(here::here("data", "Edmonds_pH5_2023-01-20-2.csv"))
+
+library(dataCompareR)
+
+comparison_result <- rCompare(ed_ph_1, ed_ph_2)
+summary(comparison_result)
+
+ed_wl_1 <- read_csv(here::here("data", "Edmonds_WL6_2024-09-04.csv"))
+ed_wl_2 <- read_csv(here::here("data", "Edmonds_WL6_2024-09-04 copy.csv"))
+
+comparison_result <- rCompare(ed_wl_1, ed_wl_2)
+summary(comparison_result)
+
+jh_wl_1 <- read_csv(here::here("data", "JeffersonHead_WL5_2024-09-04.csv"))
+jh_wl_2 <- read_csv(here::here("data", "JeffersonHead_WL5_2024-09-04 copy.csv"))
+
+comparison_result <- rCompare(jh_wl_1, jh_wl_2)
+summary(comparison_result)
+
+wp_wl_1 <- read_csv(here::here("data", "WingPoint_WL4_2024-09-04.csv"))
+wp_wl_2 <- read_csv(here::here("data", "WingPoint_WL4_2024-09-04 copy.csv"))
+
+comparison_result <- rCompare(wp_wl_1, wp_wl_2)
+summary(comparison_result)
+```
+
+
+
+
 
