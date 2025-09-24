@@ -1,4 +1,8 @@
 /data
+.DS_Store
+
+logger_data_test.rds
+processed_files_test.rds
 
 # History files
 .Rhistory
