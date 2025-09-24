@@ -1,9 +1,15 @@
 ---
 title: "Update Index Logger Data Main File"
 format: html
+warning: false
+message: false
+embed-resources: true
+toc: true
 editor: 
   markdown: 
     wrap: 72
+editor_options: 
+  chunk_output_type: console
 ---
 
 # Overview
@@ -58,7 +64,13 @@ Where:
 
 ## Metadata sheet
 
-# Workflow
+It is important that the `SiteName`, `LoggerNickname`, and
+`Deployment-date` are found in the metadata. This is how the code will
+find more information about each file! Ensure that these 3 parts are
+found in metadata columns `Site`, `Nickname`, and either
+`Initial Deployment Date` or `RelaunchDate`, respectively.
+
+# Update the Main Data File
 
 ## Step 1: Setup
 
@@ -76,6 +88,7 @@ library(googlesheets4)
 library(tidyverse)
 library(janitor)
 library(lubridate)
+library(here)
 
 # We also need to source our functions
 source("index_data_processing_functions.r")
@@ -87,16 +100,342 @@ follow the instructions in your Console:
 
 ```{r}
 # Authenticate with Google Drive (only need to do this once)
-drive_auth()
-gs4_auth()
+# drive_auth()
+# gs4_auth()
 ```
 
-## Step 2:
+## Step 2: Specify Parameters
 
-Run the next few lines to update the kelp index site's logger data from
-the Google Drive
+Replace the values in the quotation marks `" "` if necessary.
 
 ```{r}
-# 
-data <- update_logger_data_incremental()
+# Folder to search in for logger files. Currently named "csvfiles" in Drive
+# Folder ID found after the final / in the folder's URL
+root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv"
+
+# Link to the metadata sheet
+metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098"
+
+# Name of the tab with the file metadata
+sheet_name = " Deployments_IndexOnly"
+```
+
+## Step 3: Update File
+
+Use the next chunk of code to update the kelp index site's logger data
+from the Google Drive. Choose how you would like to update the data,
+highlight that code with your mouse and un-comment (remove the `#`)
+using `command + shift + c` on mac or `ctrl + shift + c` on PC, then run
+the line by placing your cursor after the closing parenthesis `)` and
+pushing `command + return` on mac or `ctrl + enter` on pc.
+
+```{r}
+########## Add new files to existing file ##########
+
+data <- update_logger_data_incremental(root_folder_id = root_folder_id,
+                                       metadata_file_url = metadata_file_url,
+                                       sheet_name = sheet_name)
+
+
+
+
+########## Re-process all old files in addition to new files  ##########
+
+# data <- update_logger_data_incremental(root_folder_id = root_folder_id,
+#                                        metadata_file_url = metadata_file_url,
+#                                        sheet_name = sheet_name,
+#                                        force_reprocess = TRUE)
+```
+
+# Visual Check
+
+The final, optional step is to visually check the data.
+
+#### Tidbit Temperature
+
+Surface:
+
+```{r}
+#| code-fold: true
+# Surface temperature by site
+data |>
+  filter(position == "surface") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = tidbit_temp_c, color = temp_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "SST by Site",
+       x = "Date",
+       y = "Temperature (°C)") +
+  theme_minimal()
+
+```
+
+#### pH
+
+Surface:
+
+```{r}
+#| code-fold: true
+# pH surface
+data |>
+  filter(position == "surface") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Surface pH by Site",
+       x = "Date",
+       y = "pH") +
+  theme_minimal()
+
+```
+
+Bottom:
+
+```{r}
+#| code-fold: true
+# pH bottom
+data |>
+  filter(position == "bottom") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "pH at Bottom by Site",
+       x = "Date",
+       y = "pH") +
+  theme_minimal()
+
+```
+
+#### Dissolved Oxygen
+
+Surface:
+
+```{r}
+#| code-fold: true
+# DO surface
+# Raw
+data |>
+  filter(position == "surface") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Dissolved Oxygen at Surface by Site",
+       x = "Date",
+       y = "Dissolved Oxygen (mg/L)") +
+  theme_minimal()
+
+
+# No values below zero
+data |>
+  filter(position == "surface") |>
+  filter(do_conc_mg_per_L >= 0) |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Dissolved Oxygen at Surface by Site (Filtered to >= 0)",
+       x = "Date",
+       y = "Dissolved Oxygen (mg/L)") +
+  theme_minimal()
+```
+
+Bottom:
+
+```{r}
+#| code-fold: true
+# DO bottom
+# Raw
+data |>
+  filter(position == "bottom") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Dissolved Oxygen at Bottom by Site",
+       x = "Date",
+       y = "Dissolved Oxygen (mg/L)") +
+  theme_minimal()
+
+# No values below zero
+data |>
+  filter(position == "bottom") |>
+  filter(do_conc_mg_per_L >= 0) |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Dissolved Oxygen at Bottom by Site (Filtered to >= 0)",
+       x = "Date",
+       y = "Dissolved Oxygen (mg/L)") +
+  theme_minimal()
+
+```
+
+#### Conductivity
+
+Surface:
+
+```{r}
+#| code-fold: true
+# CON surface
+data |>
+  filter(position == "surface") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Conductivity at Surface by Site",
+       x = "Date",
+       y = "Conductivity (µS/cm)") +
+  theme_minimal()
+
+```
+
+Bottom:
+
+```{r}
+#| code-fold: true
+# CON bottom
+data |>
+  filter(position == "bottom") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Conductivity at Bottom by Site",
+       x = "Date",
+       y = "Conductivity (µS/cm)") +
+  theme_minimal()
+
+```
+
+#### Water Level
+
+Bottom:
+
+```{r}
+#| code-fold: true
+# WL bottom
+data |>
+  filter(position == "bottom") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = abs_pres_kpa, color = wl_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "Water Level at Bottom by Site",
+       x = "Date",
+       y = "Absolute Pressure (kpa)") +
+  theme_minimal()
+
+```
+
+#### Light Intensity (PAR)
+
+Bottom:
+
+```{r}
+#| code-fold: true
+# PAR bottom (raw)
+data |>
+  filter(position == "bottom") |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = raw_integrating_light, color = par_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "PAR Raw at Bottom by Site",
+       x = "Date",
+       y = "Raw Integrating Light") +
+  theme_minimal()
+
+```
+
+#### Temp All Instruments
+
+Surface:
+
+```{r}
+#| code-fold: true
+# Raw
+data |>
+  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  pivot_longer(
+    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    names_to = "temp_sensor_type",
+    values_to = "temperature_c"
+  ) |>
+  filter(position == "surface") |>
+  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~site) +
+  labs(
+    title = "Temperature Measurements at Surface by Site and Sensor Type",
+    x = "Date/Time", 
+    y = "Temperature (°C)",
+    color = "Sensor Type"
+  ) +
+  theme_minimal()
+
+# Filtered
+data |>
+  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  pivot_longer(
+    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    names_to = "temp_sensor_type",
+    values_to = "temperature_c"
+  ) |>
+  filter(position == "surface",
+         temperature_c >= 0,
+         temperature_c <= 25) |>
+  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~site) +
+  labs(
+    title = "Temperature Measurements at Surface by Site and Sensor Type",
+    subtitle = "Filtered between 0 and 25 °C",
+    x = "Date/Time", 
+    y = "Temperature (°C)",
+    color = "Sensor Type"
+  ) +
+  theme_minimal()
+```
+
+Bottom:
+
+```{r}
+#| code-fold: true
+# Raw
+data |>
+  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  pivot_longer(
+    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    names_to = "temp_sensor_type",
+    values_to = "temperature_c"
+  ) |>
+  filter(position == "bottom") |>
+  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~site) +
+  labs(
+    title = "Temperature Measurements at Bottom by Site and Sensor Type",
+    x = "Date/Time", 
+    y = "Temperature (°C)",
+    color = "Sensor Type"
+  ) +
+  theme_minimal()
+
+# Filtered
+data |>
+  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  pivot_longer(
+    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    names_to = "temp_sensor_type",
+    values_to = "temperature_c"
+  ) |>
+  filter(position == "bottom",
+         temperature_c >= 0,
+         temperature_c <= 25) |>
+  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~site) +
+  labs(
+    title = "Temperature Measurements at Bottom by Site and Sensor Type",
+    subtitle = "Filtered between 0 and 25 °C",
+    x = "Date/Time", 
+    y = "Temperature (°C)",
+    color = "Sensor Type"
+  ) +
+  theme_minimal()
 ```

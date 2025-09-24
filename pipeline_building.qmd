@@ -121,12 +121,12 @@ unique(df_temp_na_pos[,c('site','temp_logger_id','position')])
 library(plotly)
 
 ggplotly(df_temp |>
-  # filter(site == "jeffersonhead",
-  #        position == "surface",
-  #        year(datetime) == 2023) |>
-ggplot() +
-  geom_point(aes(x = datetime, y = temp_c, color = temp_logger_id), size = 0.1) +
-  facet_wrap(~site))
+           # filter(site == "jeffersonhead",
+           #        position == "surface",
+           #        year(datetime) == 2023) |>
+           ggplot() +
+           geom_point(aes(x = datetime, y = temp_c, color = temp_logger_id), size = 0.1) +
+           facet_wrap(~site))
 
 # ok so... the filtering is not perfect. because some files are kinda weirdly duplicating each other 
 # but then are not mentioned in the metadata.. EX: Edmonds_T3_2024-04-03 is from 12/06/2023 12:45:00 to 06/18/2024 7:45:00
@@ -530,70 +530,161 @@ range(data$datetime)
 unique(data$site)
 
 # surface temp visual check
-data |>
+logger_data |>
   filter(position == "surface") |>
-ggplot() +
-  geom_point(aes(x = datetime, y = temp_c, color = temp_logger_id), size = 0.1) +
+  ggplot() +
+  geom_point(aes(x = datetime, y = tidbit_temp_c, color = temp_logger_id), size = 0.1) +
   facet_wrap(~site)
+
+# surface ph
+logger_data |>
+  filter(position == "surface") |>
+  filter(pH <= 10) |>
+  ggplot() +
+  geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
+  facet_wrap(~site) +
+  labs(title = "pH at Surface by Site",
+       x = "Date",
+       y = "pH") +
+  theme_minimal()
 
 # bottom ph
-data |>
+logger_data |>
   filter(position == "bottom") |>
-ggplot() +
+  ggplot() +
   geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
-  facet_wrap(~site)
+  facet_wrap(~site) +
+  labs(title = "pH at Bottom by Site",
+       x = "Date",
+       y = "pH") +
+  theme_minimal()
+
 
 # surface do
-data |>
+logger_data |>
   filter(position == "surface") |>
-ggplot() +
+  filter(do_conc_mg_per_L >= 0) |>
+  ggplot() +
   geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
-  facet_wrap(~site)
+  facet_wrap(~site) +
+  labs(title = "Dissolved Oxygen at Surface by Site",
+       x = "Date",
+       y = "Dissolved Oxygen (mg/L)") +
+  theme_minimal()
 
-# bottom co
-data |>
+# bottom do
+logger_data |>
   filter(position == "bottom") |>
-ggplot() +
+  filter(do_conc_mg_per_L >= 0) |>
+  ggplot() +
   geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
-  facet_wrap(~site) 
+  facet_wrap(~site) +
+  labs(title = "Dissolved Oxygen at Bottom by Site",
+       x = "Date",
+       y = "Dissolved Oxygen (mg/L)") +
+  theme_minimal()
 
 
 # bottom wl
-data |>
+logger_data |>
   filter(position == "bottom") |>
-ggplot() +
+  ggplot() +
   geom_point(aes(x = datetime, y = abs_pres_kpa, color = wl_logger_id), size = 0.1) +
-  facet_wrap(~site) 
+  facet_wrap(~site) +
+  labs(title = "Water Level at Bottom by Site",
+       x = "Date",
+       y = "Absolute Pressure (kpa)") +
+  theme_minimal()
 
 
 # bottom par (raw)
-data |>
+logger_data |>
   filter(position == "bottom") |>
-ggplot() +
+  ggplot() +
   geom_point(aes(x = datetime, y = raw_integrating_light, color = par_logger_id), size = 0.1) +
-  facet_wrap(~site) 
+  facet_wrap(~site) +
+  labs(title = "PAR Raw at Bottom by Site",
+       x = "Date",
+       y = "Raw Integrating Light") +
+  theme_minimal()
 
 # bottom par (calibrated)
-data |>
+logger_data |>
   filter(position == "bottom") |>
-ggplot() +
+  ggplot() +
   geom_point(aes(x = datetime, y = calibrated_integrating_light, color = par_logger_id), size = 0.1) +
-  facet_wrap(~site) 
+  facet_wrap(~site) +
+  labs(title = "PAR Calibrated at Bottom by Site",
+       x = "Date",
+       y = "Calibrated Integrating Light") +
+  theme_minimal()
 # urm calibrated is the same as raw?
 
 # surface con
-data |>
+logger_data |>
   filter(position == "surface") |>
-ggplot() +
+  ggplot() +
   geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
-  facet_wrap(~site)
+  facet_wrap(~site) +
+  labs(title = "Conductivity at Surface by Site",
+       x = "Date",
+       y = "Conductivity (µS/cm)") +
+  theme_minimal()
 
-# bottom par (raw)
-data |>
+# bottom con
+logger_data |>
   filter(position == "bottom") |>
-ggplot() +
+  ggplot() +
   geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
-  facet_wrap(~site) 
+  facet_wrap(~site) +
+  labs(title = "Conductivity at Bottom by Site",
+       x = "Date",
+       y = "Conductivity (µS/cm)") +
+  theme_minimal()
+
+# comparing all temp measures
+logger_data |>
+  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  pivot_longer(
+    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    names_to = "temp_sensor_type",
+    values_to = "temperature_c"
+  ) |>
+  filter(position == "surface",
+         temperature_c >= 0,
+         temperature_c <= 25) |>
+  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~site) +
+  labs(
+    title = "Temperature Measurements at Surface by Site",
+    x = "Date/Time", 
+    y = "Temperature (°C)",
+    color = "Sensor Type"
+  ) +
+  theme_minimal()
+
+logger_data |>
+  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  pivot_longer(
+    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    names_to = "temp_sensor_type",
+    values_to = "temperature_c"
+  ) |>
+  filter(position == "bottom",
+         temperature_c >= 0,
+         temperature_c <= 25) |>
+  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
+  geom_line(alpha = 0.7) +
+  facet_wrap(~site) +
+  labs(
+    title = "Temperature Measurements at Bottom by Site",
+    x = "Date/Time", 
+    y = "Temperature (°C)",
+    color = "Sensor Type"
+  ) +
+  theme_minimal()
+
 ```
 
 
@@ -649,6 +740,29 @@ summary(comparison_result)
 ```
 
 
+---
 
+```{r}
+# Check if you have multiple rows for ANY site/position/datetime combination
+duplicates_check <- logger_data |>
+  group_by(site, position, datetime) |>
+  filter(n() > 1) |>
+  ungroup()
+
+nrow(duplicates_check)  # Should tell you how many duplicate rows exist
+
+# If there are duplicates, look at a sample
+if(nrow(duplicates_check) > 0) {
+  duplicates_check |>
+    select(site, position, datetime) |>
+    distinct() |>
+    head(10)
+}
+```
+
+```{r}
+write_csv(logger_data, here("data", "logger_data.csv"))
+
+```
 
 

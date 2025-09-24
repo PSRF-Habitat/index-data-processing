@@ -67,10 +67,6 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
   # The first part is the site name
   site_name <- parts[1]
   site_name <- tolower(str_remove_all(site_name, "[^a-zA-Z0-9]")) # Make lowercase with no special characters
-  # # Normalize Squaxin Island
-  # if(site_name == "squaxinisland"){
-  #   site_name = "squaxin"
-  # }
   print(paste("Site name:", site_name))
   # The second part is the logger nickname = logger_id
   logger_id <- parts[2]
@@ -92,14 +88,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
         metadata$relaunch_date == as.Date(deployment_date)
     ]
   } 
-  # # If the deployment date didn't match relaunch_date in metadata, try launch_date_office
-  # if (length(position) == 0 || all(is.na(position))) {
-  #   position <- metadata$position[
-  #     metadata$site == site_name &
-  #       metadata$logger_id == logger_id &
-  #       metadata$launch_date_office == as.Date(deployment_date)
-  #   ]
-  # } 
+  
   # If there are many positions found (rare), use the first non-NA match
   if (length(position) > 1) {
     warning(paste("Multiple positions found. Using the first non-NA. Matches:", paste(position, collapse = ", ")))
@@ -230,6 +219,11 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     warning("No match found for date logger was placed in water. 
             May cause issues with filtering out-of-water time.")
   }
+  # If there are multiple matches, use the first non-NA match
+  if (length(in_water_date) > 1) {
+    warning(paste("Multiple in_water_dates found found. Using the first non-NA. Matches:", paste(in_water_date, collapse = ", ")))
+    in_water_date <- in_water_date[!is.na(in_water_date)][1]
+  } 
   
   # Date + time logger was taken out of water
   # If initial deployment file, use relaunch_recovery_datetime
@@ -260,9 +254,14 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     warning("No match found for date logger was taken out of water. 
             May cause issues with filtering out-of-water time.")
   }
+  # If there are multiple matches, use the first non-NA match
+  if (length(out_of_water_date) > 1) {
+    warning(paste("Multiple in_water_dates found found. Using the first non-NA. Matches:", paste(out_of_water_date, collapse = ", ")))
+    out_of_water_date <- out_of_water_date[!is.na(out_of_water_date)][1]
+  } 
   
   print(paste("In-water date:", in_water_date))
-  print(paste("Out-of-water date:", relaunch_recovery_date))
+  print(paste("Out-of-water date:", out_of_water_date))
   
   print(paste("Reading file:", file_name))
   print(paste("Sensor type:", sensor_type))
@@ -326,10 +325,10 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     
     # Filtering out-of-water times 
     df <- df |>
-      # Add in missing times as NA to complete timeseries
-      group_by(site, position) |>
-      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
-      ungroup() |>
+      # # Add in missing times as NA to complete timeseries
+      # group_by(site, position) |>
+      # complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      # ungroup() |>
       # Set temp to NA when it was out of water with a 15 minute buffer
       mutate(
         tidbit_temp_c = case_when(
@@ -415,10 +414,10 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     
     # Filtering out-of-water times 
     df <- df |>
-      # Add in missing times as NA to complete timeseries
-      group_by(site, position) |>
-      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
-      ungroup() |>
+      # # Add in missing times as NA to complete timeseries
+      # group_by(site, position) |>
+      # complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      # ungroup() |>
       # mutate(
       #   pH = case_when(
       #     !is.na(initial_deployment_date) &
@@ -529,10 +528,10 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     
     # Filtering out-of-water times 
     df <- df |>
-      # Add in missing times as NA to complete timeseries
-      group_by(site, position) |>
-      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
-      ungroup() |>
+      # # Add in missing times as NA to complete timeseries
+      # group_by(site, position) |>
+      # complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      # ungroup() |>
       # mutate(
       #   abs_pres_kpa = case_when(
       #     !is.na(initial_deployment_date) &
@@ -608,9 +607,9 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     # Filtering out-of-water times 
     df <- df |>
       # Add in missing times as NA to complete timeseries
-      group_by(site, position) |>
-      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
-      ungroup() |>
+      # group_by(site, position) |>
+      # complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      # ungroup() |>
       # mutate(
       #   high_range_microsiemens_per_cm = case_when(
       #     !is.na(initial_deployment_date) &
@@ -681,9 +680,9 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     # Filtering out-of-water times 
     df <- df |>
       # Add in missing times as NA to complete timeseries
-      group_by(site, position) |>
-      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
-      ungroup() |>
+      # group_by(site, position) |>
+      # complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      # ungroup() |>
       # mutate(
       #   do_conc_mg_per_L = case_when(
       #     !is.na(initial_deployment_date) &
@@ -761,9 +760,9 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     # Filtering out-of-water times 
     df <- df |>
       # Add in missing times as NA to complete timeseries
-      group_by(site, position) |>
-      complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
-      ungroup() |>
+      # group_by(site, position) |>
+      # complete(datetime = seq(min(datetime), max(datetime), by = "15 mins")) |>
+      # ungroup() |>
       # mutate(
       #   raw_integrating_light = case_when(
       #     !is.na(initial_deployment_date) &
@@ -828,7 +827,7 @@ read_and_clean_metadata <- function(metadata_file_url = "https://docs.google.com
   metadata <- metadata_raw |>
     clean_names() |>
     # Rename nickname to logger_id to match logger file convention
-    rename("site" = "x1",
+    rename( # "site" = "x1",
            "logger_id" = "nickname") |>
     separate(relaunch_file_name_recovery_file_name,
              into = c("relaunch_file_name", "recovery_file_name"),
@@ -1470,6 +1469,24 @@ update_logger_data_incremental <- function(root_folder_id = "1k5u8iOhR5alnymc7BV
     warning("No data was successfully processed")
     return(existing_data)
   }
+  
+  # Filter to keep only 15-minute interval timestamps
+  all_data <- all_data |>
+    filter(minute(datetime) %in% c(0, 15, 30, 45) & second(datetime) == 0)
+  
+  if (!is.null(all_data)) {
+    message("Creating complete 15-minute time series...")
+    all_data <- all_data |>
+      group_by(site, position) |>
+      complete(datetime = seq(min(datetime, na.rm = TRUE), 
+                              max(datetime, na.rm = TRUE), 
+                              by = "15 mins")) |>
+      ungroup() |>
+      # Remove any remaining duplicates
+      group_by(site, position, datetime) |>
+      summarise(across(everything(), ~ first(na.omit(.x))[1]), .groups = "drop")
+  }
+
   
   # Sort final dataset
   all_data <- all_data |>
