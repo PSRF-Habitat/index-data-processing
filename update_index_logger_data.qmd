@@ -1,8 +1,6 @@
 ---
 title: "Update Index Logger Data Main File"
 format: html
-warning: false
-message: false
 embed-resources: true
 toc: true
 editor: 
@@ -26,20 +24,23 @@ Folder structure in Drive must match this format:
 ```         
 .
 └── csvfiles/
-    ├── TEMP/
+    ├── Temperatue/
     │   ├── SiteName_LoggerNickname_Deployment-date.csv
     │   └── ex: SquaxinIsland_T4_2024-04-20.csv
     ├── pH/
     │   ├── SiteName_LoggerNickname_Deployment-date.csv
     │   └── ex: Magnolia_PH11_2024-04-20.csv
-    ├── WL/
+    ├── Water Level/
     │   ├── SiteName_LoggerNickname_Deployment-date.csv
     │   └── ex: PointVashon_WL3_2024-04-20.csv
     └── ...etc
 ```
 
 Here, the root folder is `csvfiles/`, with sub-folders corresponding to
-the sensor types.
+the sensor types. While the name of the root folder can be changed, it
+is important that the sub files are named `Temperature`, `pH`,
+`Water Level`, `Dissolved Oxygen`, `Conductivity`, and `PAR` (case
+insensitive).
 
 Within each sub-folder, each file to be processed needs to follow the
 naming convention: `SiteName_LoggerNickname_Deployment-date.csv`
@@ -109,6 +110,7 @@ follow the instructions in your Console:
 Replace the values in the quotation marks `" "` if necessary.
 
 ```{r}
+########## PSRF Sites ##########
 # Folder to search in for logger files. Currently named "csvfiles" in Drive
 # Folder ID found after the final / in the folder's URL
 root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv"
@@ -118,6 +120,41 @@ metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7p
 
 # Name of the tab with the file metadata
 sheet_name = " Deployments_IndexOnly"
+
+
+########## Reef Check Sites ##########
+# # Folder to search in for logger files. Currently named "CSV" in Drive
+# # Folder ID found after the final / in the folder's URL
+# root_folder_id = "1fvtprLxnCWSH3EQ3DUC4cyvgUGvPBGeN"
+# 
+# # Full link to the metadata sheet
+# metadata_file_url = "https://docs.google.com/spreadsheets/d/1-p-RWjFonTMefs3JIqPIOhIjcWqFwmQ9sE6ty4WEkOg/edit?gid=0#gid=0"
+# 
+# # Name of the tab with the file metadata
+# sheet_name = "Deployments"
+
+########## Point Defiance Zoo & Aquarium Sites ##########
+# # Folder to search in for logger files. Currently named "CSV" in Drive
+# # Folder ID found after the final / in the folder's URL
+# root_folder_id = "17jpThnU1QRwp3Tq09XacaQS9fQKnYxRv"
+# 
+# # Full link to the metadata sheet
+# metadata_file_url = "https://docs.google.com/spreadsheets/d/1QBCwXV7_KCdYab-zWmXJXDDACZXpJVtLNQuzltwy3fs/edit?gid=0#gid=0"
+# 
+# # Name of the tab with the file metadata
+# sheet_name = "Deployments"
+
+
+########## Friday Harbor Labs Sites ##########
+# # Folder to search in for logger files. Currently named "CSV" in Drive
+# # Folder ID found after the final / in the folder's URL
+# root_folder_id = "1ZR9EpXXhPtk-9R6eyDI-wzs-m0My36c0"
+# 
+# # Full link to the metadata sheet
+# metadata_file_url = "https://docs.google.com/spreadsheets/d/1xQ_MkgwL1-ewZWO1tq8LaTLUHW-YOx2nVj_cQ7sz4pw/edit?gid=0#gid=0"
+# 
+# # Name of the tab with the file metadata
+# sheet_name = "Deployments"
 ```
 
 ## Step 3: Update File
@@ -145,6 +182,55 @@ data <- update_logger_data_incremental(root_folder_id = root_folder_id,
 #                                        metadata_file_url = metadata_file_url,
 #                                        sheet_name = sheet_name,
 #                                        force_reprocess = TRUE)
+```
+
+## Step 4: Export as CSV to Google Drive
+
+```{r}
+
+# ===== Logger Data ===== #
+# Generate filename with today's date
+today <- Sys.Date()
+csv_filename <- paste0("kelp_index_combined_sensor_data_", today, ".csv")
+rds_filename <- paste0("kelp_index_combined_sensor_data_", today, ".rds")
+
+# Create temporary CSV file
+temp_csv <- tempfile(fileext = ".csv")
+write_csv(data, temp_csv)
+
+# Upload CSV to Google Drive
+drive_upload(media = temp_csv,
+             name = csv_filename,
+             path = as_id("1uGfyiyj-xAdy6xM2j81l7jDZK9SgNBw6"),
+             overwrite = TRUE)
+
+# Also upload RDS version
+temp_rds <- tempfile(fileext = ".rds")
+saveRDS(data, temp_rds)
+drive_upload(media = temp_csv,
+             name = rds_filename,
+             path = as_id("1uGfyiyj-xAdy6xM2j81l7jDZK9SgNBw6"),
+             overwrite = TRUE)
+
+
+# ===== List of processed files ===== #
+processed_filename <- paste0("processed_files_", today, ".csv")
+processed_files <- read_rds(here("data", "processed_files.rds"))
+processed_files <- as.data.frame(processed_files)
+
+# Create temporary CSV file
+temp_csv <- tempfile(fileext = ".csv")
+write_csv(processed_files, temp_csv)
+
+# Upload CSV to Google Drive
+drive_upload(media = temp_csv,
+             name = processed_filename,
+             path = as_id("1uGfyiyj-xAdy6xM2j81l7jDZK9SgNBw6"),
+             overwrite = TRUE)
+
+# Clean up temp files
+unlink(temp_csv)
+unlink(temp_rds)
 ```
 
 # Visual Check
@@ -349,10 +435,14 @@ Surface:
 ```{r}
 #| code-fold: true
 # Raw
+
+
+possible_temp_cols <- c("tidbit_temp_c", "ph_temp_c", "do_temp_c", "wl_temp_c", "con_temp_c")
+
 data |>
-  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
   pivot_longer(
-    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    cols = c(any_of(possible_temp_cols)),
     names_to = "temp_sensor_type",
     values_to = "temperature_c"
   ) |>
@@ -370,9 +460,9 @@ data |>
 
 # Filtered
 data |>
-  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
   pivot_longer(
-    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    cols = c(any_of(possible_temp_cols)),
     names_to = "temp_sensor_type",
     values_to = "temperature_c"
   ) |>
@@ -398,15 +488,15 @@ Bottom:
 #| code-fold: true
 # Raw
 data |>
-  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
   pivot_longer(
-    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    cols = c(any_of(possible_temp_cols)),
     names_to = "temp_sensor_type",
     values_to = "temperature_c"
   ) |>
   filter(position == "bottom") |>
   ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
-  geom_line(alpha = 0.7) +
+  geom_line(alpha = 0.5) +
   facet_wrap(~site) +
   labs(
     title = "Temperature Measurements at Bottom by Site and Sensor Type",
@@ -418,9 +508,9 @@ data |>
 
 # Filtered
 data |>
-  select(site, position, datetime, tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c) |>
+  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
   pivot_longer(
-    cols = c(tidbit_temp_c, ph_temp_c, do_temp_c, wl_temp_c, con_temp_c),
+    cols = c(any_of(possible_temp_cols)),
     names_to = "temp_sensor_type",
     values_to = "temperature_c"
   ) |>
@@ -428,7 +518,7 @@ data |>
          temperature_c >= 0,
          temperature_c <= 25) |>
   ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
-  geom_line(alpha = 0.7) +
+  geom_line(alpha = 0.5) +
   facet_wrap(~site) +
   labs(
     title = "Temperature Measurements at Bottom by Site and Sensor Type",

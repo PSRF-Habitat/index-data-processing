@@ -765,4 +765,23 @@ write_csv(logger_data, here("data", "logger_data.csv"))
 
 ```
 
+```{r}
+df <- data |>
+  filter(position == "other")
+
+unique(df$site)
+
+df <- df |>
+  filter(site == "jeffersonhead")
+
+
+df <- data |>
+  filter(position == "foulweatherbluff",
+         do_logger_id == "DO16")
+
+"NorthwestNarrows_DO8_2025-02-18.csv" %in% processed_files
+
+
+```
+
 
