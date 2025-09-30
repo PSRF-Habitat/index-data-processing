@@ -63,6 +63,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
   file_id <- file_row$id      # File ID for Google Drive API
   file_name <- file_row$name  # File name
   sensor_type <- tolower(file_row$sensor_type)  # Sensor type pulled from folder name, to know how to proceed processing
+  sensor_type <- str_trim(sensor_type)
   
   # Grab info from file name
   parts <- str_split(file_name, "_", simplify = TRUE)
@@ -220,7 +221,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       setNames(c("datetime", "tidbit_temp_c")) |>
       mutate(site = site_name, position = position, temp_logger_id = logger_id, .before = datetime) |>
       # Make datetime column POSIXct class
-      mutate(datetime = parse_date_time(datetime, orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
+      mutate(datetime = parse_date_time(datetime, orders = c("m/d/y I:M:S p", "m/d/y HMS", "m/d/y HM"))) |>
       filter(!is.na(tidbit_temp_c)) |>
       distinct()
     
@@ -291,7 +292,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
         position = position,
         .before = datetime
       ) |>
-      mutate(datetime = parse_date_time(datetime, orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
+      mutate(datetime = parse_date_time(datetime, orders = c("m/d/y I:M:S p", "m/d/y HMS", "m/d/y HM"))) |>
       distinct()
     
     df <- df |>
@@ -376,7 +377,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
              wl_logger_id = logger_id,
              position = position,
              .before = datetime) |>
-      mutate(datetime = parse_date_time(datetime, orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
+      mutate(datetime = parse_date_time(datetime, orders = c("m/d/y I:M:S p", "m/d/y HMS", "m/d/y HM"))) |>
       filter(!is.na(abs_pres_kpa)) |>
       distinct()
     
@@ -439,7 +440,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
              con_logger_id = logger_id,
              .before = datetime) |>
       mutate(datetime = parse_date_time(datetime,
-                                        orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
+                                        orders = c("m/d/y I:M:S p", "m/d/y HMS", "m/d/y HM"))) |>
       filter(!is.na(high_range_microsiemens_per_cm)) |>
       distinct()
     
@@ -505,7 +506,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
              position = position,
              .before = datetime) |>
       mutate(datetime = parse_date_time(datetime,
-                                        orders = c("m/d/y I:M:S p", "m/d/y HMS"))) |>
+                                        orders = c("m/d/y I:M:S p", "m/d/y HMS", "m/d/y HM"))) |>
       filter(!is.na(do_conc_mg_per_L)) |>
       distinct()
     
@@ -560,7 +561,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       
       df <- df |>
         mutate(datetime = parse_date_time(paste(date, time),
-                                          orders = c("dmy HMS", "dmy HM", "dmy IMp")), 
+                                          orders = c("dmy HMS", "dmy HM", "dmy IMp", "m/d/y HM")), 
                .before = raw_integrating_light) |>
         select(datetime, raw_integrating_light, calibrated_integrating_light)
     }
@@ -810,6 +811,7 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
   for (i in seq_len(nrow(files_to_process))) {
     file_row <- files_to_process[i, ]
     sensor_type <- tolower(file_row$sensor_type)
+    sensor_type <- str_trim(sensor_type)
     
     message(paste("Processing new file", i, "of", nrow(files_to_process), ":", file_row$name))
     
@@ -984,9 +986,16 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
   }
   
   # Filter to keep only 15-minute interval timestamps
-  all_data <- all_data |>
-    filter(minute(datetime) %in% c(0, 15, 30, 45) & second(datetime) == 0)
+  # all_data <- all_data |>
+  #   filter(minute(datetime) %in% c(0, 15, 30, 45) & second(datetime) == 0)
   
+  # Round all timestamps to nearest 15 minutes and handle duplicates
+  all_data <- all_data |>
+    mutate(datetime = round_date(datetime, "15 minutes")) |>
+    # Group by all key columns and aggregate duplicates
+    group_by(site, position, datetime) |>
+    summarise(across(everything(), ~ first(na.omit(.x))[1]), .groups = "drop")
+ 
   if (!is.null(all_data)) {
     message("Creating complete 15-minute time series...")
     all_data <- all_data |>
@@ -999,8 +1008,7 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
       group_by(site, position, datetime) |>
       summarise(across(everything(), ~ first(na.omit(.x))[1]), .groups = "drop")
   }
-  
-  
+
   # Sort final dataset
   all_data <- all_data |>
     arrange(site, position, datetime) |>

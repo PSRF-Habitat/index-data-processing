@@ -785,3 +785,48 @@ df <- data |>
 ```
 
 
+```{r}
+"Edmonds_DNR6428_2023-10-13.CSV" %in% processed_files
+"FoulweatherBluff_CON32_2025-02-18.csv" %in% processed_files
+"NorthwestNarrows_DO7_2025-05-21.csv" %in% processed_files
+```
+
+```{r}
+# Load your saved data
+data <- readRDS(here::here("data", "logger_data.rds"))
+
+# Check for records from this specific file
+data |> 
+  filter(site == "edmonds", 
+         wl_logger_id == "DNR6428",  # or appropriate logger_id column
+         datetime >= as.Date("2023-10-13")) |> 
+  nrow()
+
+processed <- readRDS(here::here("data", "processed_files.rds"))
+processed <- processed[!processed %in% c("NorthwestNarrows_DO7_2025-05-21.csv")]
+saveRDS(processed, here::here("data", "processed_files.rds"))
+```
+
+```{r}
+# Check total DO7 rows
+data |> 
+  filter(do_logger_id == "DO7") |> 
+  nrow()
+
+# Check date range of DO7
+data |> 
+  filter(do_logger_id == "DO7") |> 
+  summarise(min_date = min(datetime, na.rm = TRUE), 
+            max_date = max(datetime, na.rm = TRUE))
+
+# Check if there are NAs in the May-Aug range
+data |> 
+  filter(do_logger_id == "DO7") |>
+  filter(datetime >= as.POSIXct("2025-05-21")) |>
+  summarise(
+    total_rows = n(),
+    na_do_conc = sum(is.na(do_conc_mg_per_L)),
+    non_na_do_conc = sum(!is.na(do_conc_mg_per_L))
+  )
+```
+

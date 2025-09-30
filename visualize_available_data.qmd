@@ -1,0 +1,1059 @@
+---
+title: "Index Data Visual Overview"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+Gantt-style charts for an overview of available Kelp Index site's environmental sensor data.
+
+# Setup
+
+```{r}
+# load libraries
+library(tidyverse)
+library(scales)
+library(here)
+library(stringr)
+
+# read in data
+data <- read_rds(here("data", "logger_data.rds"))
+```
+
+# Figures site-by-site
+
+```{r}
+# list all sites
+print("Index Sites:")
+unique(data$site)
+
+# list out labels for y axis
+variable_labels <- c(
+  "do_conc_mg_per_L" = "DO",
+  "abs_pres_kpa" = "WL",
+  "high_range_microsiemens_per_cm" = "CON",
+  "raw_integrating_light" = "PAR",
+  "tidbit_temp_c" = "SST",
+  "millivolts" = "pH"
+)
+
+# define order for y axis
+variable_order <- c(
+  "raw_integrating_light",
+  "abs_pres_kpa",
+  "high_range_microsiemens_per_cm",
+  "do_conc_mg_per_L",
+  "millivolts",
+  "tidbit_temp_c"
+)
+
+# function to prep data for plotting
+
+prep_for_plotting_function <- function(site_name) {
+  
+  # filter to site
+  site <- data |> 
+    filter(site == site_name) #|> 
+   # filter(!is.na(position))
+  
+  # define environmental variable cols, excluding metadata and logger_id columns
+  metadata_cols <- c("site", "position", "datetime")
+  logger_id_cols <- names(site)[str_detect(names(site), "_logger_id$")]
+  env_variables <- setdiff(names(site), c(metadata_cols, logger_id_cols))
+  
+  # pivot longer for plotting
+  availability_data <- site |>
+    select(site, datetime, position, all_of(env_variables)) |>
+    # remove bottom temp columns
+    select(-c(con_temp_c, do_temp_c, ph_temp_c, 
+              wl_temp_c, pH, calibrated_integrating_light)) |>
+    pivot_longer(cols = -c(site, datetime, position), 
+                 names_to = "variable", 
+                 values_to = "value") |>
+    # add a column indicating if there is data for that datetime
+    mutate(has_data = !is.na(value)) |>
+    arrange(site, variable, datetime, position)
+  
+  # create data ranges for each variable
+  data_ranges <- availability_data |>
+    filter(has_data == TRUE) |>
+    group_by(site, position, variable) |>
+    # make sensor types an ordered factor (for ordering on plot)
+    mutate(variable = factor(variable, levels = variable_order)) |>
+    # also vectorize position
+    mutate(position = factor(position, levels = c("surface", "bottom"))) |>
+    # calculate the time difference between current time and previous time
+    mutate(time_diff = as.numeric(datetime - lag(datetime), units = "hours"),
+           # gaps > 1 hour = new bar segment
+           # 1 hour bc 15 mins isn't enough time to show up on plot
+           new_segment = is.na(time_diff) | time_diff > 1) |>
+    # label each block of continuous data
+    mutate(segment_id = cumsum(new_segment)) |>
+    group_by(site, position, variable, segment_id) |>
+    # grab the start and end date for each chunck of continuous data
+    summarise(start_date = min(datetime),
+              end_date = max(datetime),
+              .groups = "drop") |>
+    # offset bars if there is surface and bottom data
+    group_by(variable) |>
+    mutate(n_positions = n_distinct(position),   # count number of positions
+           y_offset = case_when(                 # define offsets
+             n_positions == 1 ~ 0,               # center if only one position
+             position == "surface" ~ 0.1,        # surface offset if multiple positions
+             position == "bottom" ~ -0.1,        # bottom offset if multiple positions
+             .default = 0),
+           variable_position = paste(variable, position, sep = "_")) |>
+    ungroup()
+  
+  return(data_ranges)
+}
+```
+
+## Centennial park
+
+```{r}
+# cp data
+cp_data_ranges <- prep_for_plotting_function("centennialpark")
+
+
+cp <- data |> 
+    filter(site == "centennialpark") #|> 
+   # filter(!is.na(position))
+
+unique(cp$par_logger_id)
+  
+  # define environmental variable cols, excluding metadata and logger_id columns
+  metadata_cols <- c("site", "position", "datetime")
+  logger_id_cols <- names(site)[str_detect(names(site), "_logger_id$")]
+  env_variables <- setdiff(names(site), c(metadata_cols, logger_id_cols))
+
+# pivot longer for plotting
+  availability_data <- site |>
+    select(site, datetime, position, all_of(env_variables)) |>
+    # remove bottom temp columns
+    select(-c(con_temp_c, do_temp_c, ph_temp_c, 
+              wl_temp_c, pH, calibrated_integrating_light)) |>
+    pivot_longer(cols = -c(site, datetime, position), 
+                 names_to = "variable", 
+                 values_to = "value") |>
+    # add a column indicating if there is data for that datetime
+    mutate(has_data = !is.na(value)) |>
+    arrange(site, variable, datetime, position)
+
+# get date ranges
+min(cp_data_ranges$start_date)
+max(cp_data_ranges$end_date)
+
+# plot
+p_cp <- ggplot(cp_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2024-09-01", "2025-10-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Centennial Park (9/19/2024 - 9/18/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+    caption = "Bottom pH 3/12/2025 - 6/9/2025 = Invalid data"
+  ) +
+  theme_minimal() +
+  theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "cp_timeline.pdf"), p_cp, width = 10, height = 6)
+```
+
+
+
+## Edmonds
+
+```{r}
+# ed data
+ed_data_ranges <- prep_for_plotting_function("edmonds") |>
+  filter(!is.na(position))  # filter out invalid file edmonds_con6_09-12-2024
+
+# date ranges
+min(ed_data_ranges$start_date)
+max(ed_data_ranges$end_date)
+
+# plot
+ p_ed <- ggplot(ed_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = date_format("%b"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2023-01-01", "2025-8-15")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Edmonds (1/11/2023 - 7/17/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "ed_timeline.pdf"), p_ed, width = 10, height = 6)
+```
+
+## Foulweather Bluff
+
+```{r}
+# fw data
+fw_data_ranges <- prep_for_plotting_function("foulweatherbluff")
+
+data |>
+  filter(site == "foulweatherbluff") |>
+  filter(con_logger_id == "CON32")
+
+# date ranges
+min(fw_data_ranges$start_date)
+max(fw_data_ranges$end_date)
+
+# plot
+p_fw <- ggplot(fw_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2025-02-01", "2025-8-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Foulweather Bluff (2/18/2025 - 7/1/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "fw_timeline.pdf"), p_fw, width = 10, height = 6)
+```
+
+## Freshwater Bay
+
+```{r}
+# fb data
+fb_data_ranges <- prep_for_plotting_function("freshwaterbay")
+
+# date ranges
+min(fb_data_ranges$start_date)
+max(fb_data_ranges$end_date)
+
+# plot
+p_fb <- ggplot(fb_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2025-02-01", "2025-9-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Freshwater Bay (2/27/2025 - 8/5/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "fb_timeline.pdf"), p_fb, width = 10, height = 6)
+```
+
+## Jefferson Head
+
+```{r}
+# fb data
+jh_data_ranges <- prep_for_plotting_function("jeffersonhead")
+
+# date ranges
+min(jh_data_ranges$start_date)
+max(jh_data_ranges$end_date)
+
+# plot
+p_jh <- ggplot(jh_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2023-01-01", "2025-9-15")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Jefferson Head (1/20/2023 - 8/26/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+    caption = "CON7 2024-09-04 (surface) not in Drive. \n JeffersonHead_CON5_2025-06-04 file stops on 6/3/2025"
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "jh_timeline.pdf"), p_jh, width = 10, height = 6)
+```
+
+## Lincoln Park
+
+```{r}
+# lp data
+lp_data_ranges <- prep_for_plotting_function("lincolnpark")
+
+# date ranges
+min(lp_data_ranges$start_date)
+max(lp_data_ranges$end_date)
+
+# plot
+p_lp <- ggplot(lp_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2025-03-01", "2025-09-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Lincoln Park (3/13/2025 - 8/28/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "lp_timeline.pdf"), p_lp, width = 10, height = 6)
+```
+
+## Magnolia
+
+```{r}
+# fb data
+mag_data_ranges <- prep_for_plotting_function("magnolia")
+
+# date ranges
+min(mag_data_ranges$start_date)
+max(mag_data_ranges$end_date)
+
+# plot
+p_mag <- ggplot(mag_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2025-03-01", "2025-10-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Magnolia (3/13/2025 - 9/18/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth"
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "mag_timeline.pdf"), p_mag, width = 10, height = 6)
+```
+
+## North Beach
+
+```{r}
+# nb data
+nb_data_ranges <- prep_for_plotting_function("northbeach")
+
+# date ranges
+min(nb_data_ranges$start_date)
+max(nb_data_ranges$end_date)
+
+# plot
+p_nb <- ggplot(nb_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2025-02-01", "2025-09-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for North Beach (2/13/2025 - 8/12/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth"
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "nb_timeline.pdf"), p_nb, width = 10, height = 6)
+```
+
+## Northwest Narrows
+
+
+```{r}
+# nb data
+nn_data_ranges <- prep_for_plotting_function("northwestnarrows")
+
+# date ranges
+min(nn_data_ranges$start_date)
+max(nn_data_ranges$end_date)
+
+# plot
+p_nn <- ggplot(nn_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2025-02-01", "2025-09-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Northwest Narrows (2/18/2025 - 8/18/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth"
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "nn_timeline.pdf"), p_nn, width = 10, height = 6)
+```
+
+## Point Vashon
+
+```{r}
+# pv data
+pv_data_ranges <- prep_for_plotting_function("pointvashon")
+
+# date ranges
+min(pv_data_ranges$start_date)
+max(pv_data_ranges$end_date)
+
+# plot
+p_pv <- ggplot(pv_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2025-03-01", "2025-10-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Point Vashon (3/13/2025 - 9/18/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth"
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "pv_timeline.pdf"), p_pv, width = 10, height = 6)
+```
+
+## Squaxin Island
+
+```{r}
+# si data
+si_data_ranges <- prep_for_plotting_function("squaxinisland")
+
+# date ranges
+min(si_data_ranges$start_date)
+max(si_data_ranges$end_date)
+
+# plot
+p_si <- ggplot(si_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b '%y"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2024-09-01", "2025-09-01")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Squaxin Island (9/24/2024 - 8/22/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+    caption = "Missing DO20 2025-05-15"
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "si_timeline.pdf"), p_si, width = 10, height = 6)
+```
+
+## Wing Point
+
+```{r}
+# wp data
+wp_data_ranges <- prep_for_plotting_function("wingpoint")
+
+# date ranges
+min(wp_data_ranges$start_date)
+max(wp_data_ranges$end_date)
+
+# plot
+p_wp <- ggplot(wp_data_ranges) +
+  # shade every other year to make plot easier to read
+  geom_rect(
+    # do not inherit aesthetics from main ggplot call
+    inherit.aes = FALSE,
+    # dates to shade
+    data = data.frame(
+      xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+      xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+    ),
+    aes(xmin = xmin, xmax = xmax, 
+        ymin = -Inf, ymax = Inf),
+    fill = "grey80",
+    alpha = 0.3
+  ) +
+  geom_segment(aes(x = start_date, 
+                   xend = end_date, 
+                   y = as.numeric(variable) + y_offset,
+                   yend = as.numeric(variable) + y_offset, 
+                   color = position),
+               size = 4, alpha = 0.8) +
+  scale_x_datetime(
+    labels = label_date("%b"),
+    breaks = date_breaks("1 month"),
+    limits = as.POSIXct(c("2023-01-01", "2025-09-15")),
+    expand = c(0.02, 0)
+  ) +
+  scale_color_manual(
+    name = "Position",
+    values = c("bottom" = "orange3", "surface" = "brown" ),
+    labels = c("Surface", "Bottom")
+  ) +
+  scale_y_continuous(
+    breaks = 1:length(variable_order),
+    labels = variable_labels[variable_order],
+    limits = c(0.5, length(variable_order) + 0.5)
+  ) +
+  labs(
+    title = "Sensor Data Availability for Wing Point (1/20/2023 - 8/26/2025)",
+    subtitle = "Horizontal bars show periods with available data by depth",
+  ) +
+  theme_minimal() +
+   theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "wp_timeline.pdf"), p_wp, width = 10, height = 6)
+```
+
