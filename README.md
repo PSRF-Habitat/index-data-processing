@@ -32,7 +32,7 @@ Currently, this pipeline can:
 - Save the updated combined dataset as an `.rds` and `.csv` file for analysis.
 - Track which files have already been successfully processed.
 
-The result is a cleaned, combined, and timestamp-aligned dataset of environmental sensor data by site and position in water column, saved locally as an `.rds` and `.csv` file.
+The result is a cleaned, combined dataset of environmental sensor data by site and position in water column, saved locally as an `.rds` and `.csv` file.
 
 
 # Next Steps
@@ -41,7 +41,7 @@ Future additions to this pipeline will focus on:
 
 - **Handling flagged files**: Add logic to identify and exclude logger files marked as problematic, as indicated in the metadata.
 - **Threshold-based filtering**: Implement rules to automatically flag or filter sensor readings that fall outside of expected environmental ranges.
-- **Calibration and derived values**: Add the ability to adjust raw sensor data for accuracy and convert measurements into more useful forms—such as estimating salinity from conductivity readings.
+- **Calibration and derived values**: Add the ability to adjust raw sensor data for accuracy (compensating for drift) and convert measurements into more useful forms (e.g, estimating salinity from conductivity readings).
 
 
 ---
