@@ -1,0 +1,119 @@
+---
+title: "Test {driftR} + {oce} for salinity conversions"
+format: html
+---
+
+Testing out a few R packages to account for drift and convert conductivity to salinity.
+
+Sensor drift and fouling can substantilly impact the quality of a data set. `{driftR}` corrects for drift based on linear drift over time.
+
+
+```{r}
+# load libraries
+library(tidyverse)
+library(here)
+library(driftR)     # correcting for drift in instrument
+library(wql)       # convert conductivity to salinity
+```
+
+Using `dr_read` allows you to tell the function that you are reading in a HOBO file, and it will automatically format and clean the data (!!! bye-bye pesky metadata header)
+
+```{r}
+# load conductivity data file
+con <- dr_read(file = here("data", "test", "PointVashon_CON13_2025-03-13.csv"), 
+               instrument = "HOBO", 
+               defineVar = TRUE, 
+               cleanVar = TRUE, 
+               case = "snake")
+```
+
+This first step is to calculate a correction factor, which is the time interval that has passed since the instrument was originally deployed divided by the total deployment time. This gives time-weighted correction factors that are used to adjust for increasing drift over the monitoring period. In other words, data taken closer to the initial calibration period are corrected less than data taken toward the end of the monitoring period. These factors are then used in subsequent calculations for one- or two-point calibrations.
+
+```{r}
+# calculate correction factor and keep datetime var
+# results stored in a new vector corr_fac and datetime
+con <- dr_factor(con, corrFactor = corr_fac,
+                 dateVar = date, timeVar = time,
+                 keepDateTime = TRUE)
+```
+
+This package allows for two types of calibration:
+- A one-point calibration (unclear if this is intended to be taken at deployment or retrieval)
+- A two-point calibration (calibration values taken at deployment and retrival)
+
+According to the package authors, one-point calibrations are typically used for parameters such as specific conductivity or DO, wich either do not drift significantly between calibrations or for which it is difficult to create multiple standards for field use
+
+```{r}
+# apply one-point calibration
+# results stored in new vector high_range_corr
+con <- dr_correctOne(con, sourceVar = high_range,
+                     cleanVar = high_range_corr,
+                     calVal = 27213, # what the instrument was reading (pulled from data, 3/11/25 @ 11am)
+                     calStd = 43486, # what the instrument should have been reading (from kelpindex_con_temp_calibrations sheet, cast reading 3/11/25 @ 11am)
+                     factorVar = corr_fac)
+
+# quick look at corrected vs raw values
+# not sure that I am using the correct calibration values
+ggplot(con) +
+  geom_point(aes(x = dateTime, y = high_range), color = "red", size = 0.3) +
+  geom_point(aes(x = dateTime, y = high_range_corr), color = "blue", size = 0.3) +
+  scale_x_discrete(breaks = scales::breaks_pretty())
+```
+
+We can use `dr_drop` to remove observations at the head or tail of the data, when the sensor could have been out of water. Let's remove a full 24 hours from the start and the end of the data (96 rows on either end)
+
+I didn't like that function much and would rather use tidyverse filter (:
+
+```{r}
+# make date column date type
+con <- con |>
+  mutate(date = lubridate::mdy(date))
+
+# filter out days that logger was out-of-water (buffered to the nearest full in-water day)
+con <- con |>  
+  filter(date >= "2025-03-14" & date <= "2025-06-08")
+
+# make dateTime column a datetime object
+con <- con |>
+  mutate(dateTime = parse_date_time(dateTime, orders = "mdy HMS"))
+
+# plot raw vs corrected conductivity
+ggplot(con) +
+  geom_line(aes(x = dateTime, y = high_range), color = "red", size = 0.3) +
+  geom_line(aes(x = dateTime, y = high_range_corr), color = "blue", size = 0.3) +
+  labs(title = "Correcting for Drift in Point Vashon Conductivity",
+       subtitle = "Red line = raw, blue line = corrected") +
+  theme_minimal()
+```
+
+Is this correct? I don't know!! Let's keep going and see if I can convert this to salinity :)
+
+ec2pss() converts conductivity to Practical Salinity (SP) using temperature and optionally pressure.
+Its main syntax is: `ec2pss(ec, t, p = 0)` where:
+- ec = conductivity in S/m (we will need to convert)
+- t = temperature in °C
+- p = pressure in dbar (optional; default = 0, i.e. surface)
+
+
+```{r}
+# calculate salinity
+con$salinity <- ec2pss(
+  ec = con$high_range_corr * 0.001, # converting units!
+  t = con$temp,
+  p = 0 # logger at surface
+)
+
+ggplot(con) +
+  geom_line(aes(x = dateTime, y = salinity)) +
+  labs(title = "Point Vashon Salinity March - June 2025",
+       y = "Practical Salinity Unit (S)") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank())
+```
+
+
+
+
+
+
+
