@@ -830,3 +830,36 @@ data |>
   )
 ```
 
+
+## Jan 2026 Updates Testing
+
+Attempting to update pipeline so end product is separate files for each sensor type
+
+```{r}
+# test run!
+df <- update_logger_data_incremental(root_folder_id, metadata_file_url, sheet_name, force_reprocess = TRUE)
+view(df$temp)
+
+# quick plot to check
+ggplot(df$temp |>
+         filter(position == "surface")) +
+  geom_line(aes(x = datetime, y = tidbit_temp_c, color = site))
+
+ggplot(df$con |>
+         filter(position == "surface")) +
+  geom_line(aes(x = datetime, y = high_range_microsiemens_per_cm, color = site))
+```
+
+cool! now ... 
+
+time to work through flagging issues. I want to
+
+- filter out days where loggers are being messed with (deployment, relaunch, and recovery days) - done
+- remove anything with the following flags from the metadata:
+  - "Data- Invalid", "Instrument- Recovered from bottom"
+- Add a column with the issue flag - done
+- Add a column with any notes - done
+
+I think then I will write a separate script that will walk through manually checking fouling flags. 
+
+
