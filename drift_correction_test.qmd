@@ -49,7 +49,8 @@ According to the package authors, one-point calibrations are typically used for 
 con <- dr_correctOne(con, sourceVar = high_range,
                      cleanVar = high_range_corr,
                      calVal = 27213, # what the instrument was reading (pulled from data, 3/11/25 @ 11am)
-                     calStd = 43486, # what the instrument should have been reading (from kelpindex_con_temp_calibrations sheet, cast reading 3/11/25 @ 11am)
+                     # calStd = 43486, # what the instrument should have been reading (from kelpindex_con_temp_calibrations sheet, cast reading 3/11/25 @ 11am)
+                     calStd = 24316.4, # this is from refractometer at 11am... cast was seeming very high
                      factorVar = corr_fac)
 
 # quick look at corrected vs raw values
@@ -81,7 +82,7 @@ con <- con |>
 ggplot(con) +
   geom_line(aes(x = dateTime, y = high_range), color = "red", size = 0.3) +
   geom_line(aes(x = dateTime, y = high_range_corr), color = "blue", size = 0.3) +
-  labs(title = "Correcting for Drift in Point Vashon Conductivity",
+  labs(title = "Correcting for Drift in Point Vashon Surface Conductivity",
        subtitle = "Red line = raw, blue line = corrected") +
   theme_minimal()
 ```
@@ -105,14 +106,18 @@ con$salinity <- ec2pss(
 
 ggplot(con) +
   geom_line(aes(x = dateTime, y = salinity)) +
-  labs(title = "Point Vashon Salinity March - June 2025",
+  labs(title = "Point Vashon Surface Salinity March - June 2025",
        y = "Practical Salinity Unit (S)") +
   theme_minimal() +
   theme(axis.title.x = element_blank())
 ```
 
 
+# Test 2
 
+11/21/25
+
+I am curious is trying to use a cast reading from in the field will make a difference in the salinity values we are seeing. 
 
 
 

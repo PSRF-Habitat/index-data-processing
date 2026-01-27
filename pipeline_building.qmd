@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Marina's Scratch Script for Trialing Pipeline"
 format: html
 editor_options: 
   chunk_output_type: console
@@ -15,7 +15,7 @@ library(googlesheets4)
 # source functions
 source("index_data_processing_functions.r")
 
-data <- readRDS("logger_data.rds")
+data <- readRDS(here::here("data", "logger_data.rds"))
 files <- readRDS("processed_files.rds")
 
 # authenticate google drive
@@ -33,13 +33,13 @@ temp_files <- get_logger_csvs_by_id("1MZxIPozLI_K6ietpjLzEM-ybJjGT-a48")
 
 ```{r}
 # Test fuction to get google files for ALL loggers
-logger_files <- get_all_logger_csvs_by_id()
+logger_files <- get_all_logger_csvs_by_id(root_folder_id)
 
 # Gorg. 
 
 
 # Grab and clean metadata
-metadata <- read_and_clean_metadata()
+metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
 ```
 
 

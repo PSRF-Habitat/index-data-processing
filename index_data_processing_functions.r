@@ -55,7 +55,7 @@ get_all_logger_csvs_by_id <- function(root_folder_id) {
 # Download and clean a logger CSV file from Google Drive ----
 #'
 #' @param file_row One row from get_all_logger_csvs_by_id() output
-#' @param metadata Metadata dataframee from read_and_clean_metadata()
+#' @param metadata Metadata dataframe from read_and_clean_metadata()
 #' @return A cleaned logger CSV for one file
 read_and_clean_logger_csv <- function(file_row, metadata) {
   
@@ -69,7 +69,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
   parts <- str_split(file_name, "_", simplify = TRUE)
   # The first part is the site name
   site_name <- parts[1]
-  site_name <- tolower(str_remove_all(site_name, "[^a-zA-Z0-9]")) # Make lowercase with no special characters
+  site_name <- str_replace_all(site_name, "(?<=[a-z])(?=[A-Z])", " ") # Make site name two words, e.g., North Beach
   print(paste("Site name:", site_name))
   # The second part is the logger nickname = logger_id
   logger_id <- parts[2]
@@ -637,9 +637,8 @@ read_and_clean_metadata <- function(metadata_file_url, sheet_name){
     ) |>
     # Remove rows that are year separators
     filter(!(str_detect(site, "^20\\d{2}$"))) |>
-    # Make site name consistently lowercase with no spaces or punctuation
-    mutate(site = tolower(site),
-           site = str_remove_all(site, "[^a-zA-Z0-9]")) |>
+    # Make site name capital with space. e.g., North Beach
+    mutate(site = str_replace_all(site, "(?<=[a-z])(?=[A-Z])", " ")) |>
     # Dates
     mutate(launch_date_office = parse_date_time(launch_date_office,
                                                 orders = c("ymd", "mdy")),

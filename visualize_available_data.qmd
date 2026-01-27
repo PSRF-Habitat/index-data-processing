@@ -20,6 +20,97 @@ library(stringr)
 data <- read_rds(here("data", "logger_data.rds"))
 ```
 
+# Sites overview
+
+Going for one chart with site on the y and date on the x, with Gantt-style bars when we have any available data for that site.
+
+
+```{r}
+data_availability <- data |>
+  mutate(has_data = if_any(c("raw_integrating_light",
+                             "abs_pres_kpa",
+                             "high_range_microsiemens_per_cm",
+                             "do_conc_mg_per_L",
+                             "millivolts",
+                             "tidbit_temp_c"), function(x) !is.na(x))) |>
+  group_by(site) |>
+  arrange(datetime) |>
+  mutate(data_group = cumsum(has_data != lag(has_data, default = first(has_data)))) |>
+  filter(has_data) |>
+  group_by(site, data_group) |>
+  summarize(start_date = min(datetime),
+            end_date = max(datetime),
+            .groups = "drop") |>
+  filter(site != "office",
+         site != "manchesterref") |>
+  mutate(site = fct_reorder(site, start_date, .fun = min, .desc = TRUE))
+
+
+# site labels
+site_labels <- c(
+  "edmonds" = "Edmonds",
+  "jeffersonhead" = "Jefferson Head",
+  "wingpoint" = "Wing Point", 
+  "centennialpark" = "Centennial Park",
+  "squaxinisland" = "Squaxin Island",
+  "northbeach" = "North Beach",
+  "northwestnarrows" = "Northwest Narrows",
+  "foulweatherbluff" = "Foulweather Bluff",
+  "freshwaterbay" = "Freshwater Bay",
+  "magnolia" = "Magnolia",
+  "lincolnpark" = "Lincoln Park",
+  "pointvashon" = "Point Vashon",
+  "pointcaution" = "Point Caution"
+)
+
+# plot 
+p_all <- ggplot(data_availability) +
+  # shade every other year to make plot easier to read
+  geom_rect(inherit.aes = FALSE,
+            # dates to shade
+            data = data.frame(
+              xmin = as.POSIXct(c("2024-01-01")),  # Start shading from 2024
+              xmax = as.POSIXct(c("2025-01-01"))   # End shading at end of 2024
+            ),
+            aes(xmin = xmin, xmax = xmax, 
+                ymin = -Inf, ymax = Inf),
+            fill = "grey80",
+            alpha = 0.3) +
+  geom_segment(aes(x = start_date, xend = end_date,
+                   y = site, yend = site), linewidth = 4) +
+  scale_y_discrete(labels = site_labels) +
+  scale_x_datetime(labels = label_date("%b"),
+                   breaks = date_breaks("1 month"),
+                   limits = as.POSIXct(c("2023-01-01", "2025-12-1")),
+                   expand = c(0.02, 0)
+  ) +
+  labs(title = "Sensor Data Availability Across Kelp Index Sites",
+       subtitle = "Horizontal bars show periods with available data") +
+  theme_minimal() +
+  theme(
+    #   axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor.x = element_blank(),
+   # panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey95"),
+    panel.grid.minor.y = element_blank(),
+    
+    plot.title = element_text(size = 12, face = "bold", margin = margin(5,0,5,0)),
+    plot.subtitle = element_text(size = 10, color = "gray60", margin = margin(0,0,10,0)),
+    plot.caption = element_text(size = 8, color = "gray60", margin = margin(20,10,5,10)),
+    plot.margin = margin(10,10,10,10),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "inside",
+    legend.position.inside = c(0.9,1),
+    legend.background = element_rect(fill = "white", color = "black"),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+
+ggsave(here("figures", "all_timeline.pdf"), p_all, width = 10, height = 6)
+```
+
+
 # Figures site-by-site
 
 ```{r}
@@ -54,7 +145,7 @@ prep_for_plotting_function <- function(site_name) {
   # filter to site
   site <- data |> 
     filter(site == site_name) #|> 
-   # filter(!is.na(position))
+  # filter(!is.na(position))
   
   # define environmental variable cols, excluding metadata and logger_id columns
   metadata_cols <- c("site", "position", "datetime")
@@ -117,28 +208,28 @@ cp_data_ranges <- prep_for_plotting_function("centennialpark")
 
 
 cp <- data |> 
-    filter(site == "centennialpark") #|> 
-   # filter(!is.na(position))
+  filter(site == "centennialpark") #|> 
+# filter(!is.na(position))
 
 unique(cp$par_logger_id)
-  
-  # define environmental variable cols, excluding metadata and logger_id columns
-  metadata_cols <- c("site", "position", "datetime")
-  logger_id_cols <- names(site)[str_detect(names(site), "_logger_id$")]
-  env_variables <- setdiff(names(site), c(metadata_cols, logger_id_cols))
+
+# define environmental variable cols, excluding metadata and logger_id columns
+metadata_cols <- c("site", "position", "datetime")
+logger_id_cols <- names(site)[str_detect(names(site), "_logger_id$")]
+env_variables <- setdiff(names(site), c(metadata_cols, logger_id_cols))
 
 # pivot longer for plotting
-  availability_data <- site |>
-    select(site, datetime, position, all_of(env_variables)) |>
-    # remove bottom temp columns
-    select(-c(con_temp_c, do_temp_c, ph_temp_c, 
-              wl_temp_c, pH, calibrated_integrating_light)) |>
-    pivot_longer(cols = -c(site, datetime, position), 
-                 names_to = "variable", 
-                 values_to = "value") |>
-    # add a column indicating if there is data for that datetime
-    mutate(has_data = !is.na(value)) |>
-    arrange(site, variable, datetime, position)
+availability_data <- site |>
+  select(site, datetime, position, all_of(env_variables)) |>
+  # remove bottom temp columns
+  select(-c(con_temp_c, do_temp_c, ph_temp_c, 
+            wl_temp_c, pH, calibrated_integrating_light)) |>
+  pivot_longer(cols = -c(site, datetime, position), 
+               names_to = "variable", 
+               values_to = "value") |>
+  # add a column indicating if there is data for that datetime
+  mutate(has_data = !is.na(value)) |>
+  arrange(site, variable, datetime, position)
 
 # get date ranges
 min(cp_data_ranges$start_date)
@@ -225,7 +316,7 @@ min(ed_data_ranges$start_date)
 max(ed_data_ranges$end_date)
 
 # plot
- p_ed <- ggplot(ed_data_ranges) +
+p_ed <- ggplot(ed_data_ranges) +
   # shade every other year to make plot easier to read
   geom_rect(
     # do not inherit aesthetics from main ggplot call
@@ -267,7 +358,7 @@ max(ed_data_ranges$end_date)
     subtitle = "Horizontal bars show periods with available data by depth",
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -347,7 +438,7 @@ p_fw <- ggplot(fw_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth",
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -423,7 +514,7 @@ p_fb <- ggplot(fb_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth",
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -500,7 +591,7 @@ p_jh <- ggplot(jh_data_ranges) +
     caption = "CON7 2024-09-04 (surface) not in Drive. \n JeffersonHead_CON5_2025-06-04 file stops on 6/3/2025"
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -576,7 +667,7 @@ p_lp <- ggplot(lp_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth",
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -652,7 +743,7 @@ p_mag <- ggplot(mag_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth"
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -728,7 +819,7 @@ p_nb <- ggplot(nb_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth"
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -805,7 +896,7 @@ p_nn <- ggplot(nn_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth"
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -881,7 +972,7 @@ p_pv <- ggplot(pv_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth"
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -958,7 +1049,7 @@ p_si <- ggplot(si_data_ranges) +
     caption = "Missing DO20 2025-05-15"
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
@@ -1034,7 +1125,7 @@ p_wp <- ggplot(wp_data_ranges) +
     subtitle = "Horizontal bars show periods with available data by depth",
   ) +
   theme_minimal() +
-   theme(
+  theme(
     #   axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.minor.x = element_blank(),
     panel.grid.major.y = element_blank(),
