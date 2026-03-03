@@ -52,7 +52,102 @@ get_all_logger_csvs_by_id <- function(root_folder_id) {
 } # END get_all_logger_csvs_by_id function ----
 
 
-# Download and clean a logger CSV file from Google Drive ----
+
+# Read and clean index logger metadata ----
+#'
+#' @param metadata_file_url URL to main index metadata google sheet
+#' @param sheet_name Name of the tab that the metadata is on
+#'
+#' @returns A clean metadata sheet to be combined with logger data
+#'
+read_and_clean_metadata <- function(metadata_file_url, sheet_name){
+  
+  # Read in metadata sheet from google drive
+  metadata_raw <- read_sheet(metadata_file_url,
+                             sheet = sheet_name,
+                             na = c("", "n/a", "#N/A"),
+                             col_types = "c")
+  
+  # Cleaning
+  metadata <- metadata_raw |>
+    clean_names() |>
+    # Rename nickname to logger_id to match logger file convention
+    rename("logger_id" = "nickname") |>
+    # Make position consistently lowercase
+    mutate(position = tolower(position)) |>
+    # Remove rows that are year separators
+    filter(!(str_detect(site, "^20\\d{2}$"))) |>
+    # Make site name capital with space. e.g., North Beach
+    mutate(site = str_replace_all(site, "(?<=[a-z])(?=[A-Z])", " ")) |>
+    # Parse dates from varying formats
+    mutate(initial_deployment_date = 
+             parse_date_time(initial_deployment_date,
+                             orders = c("ymd", "mdy")),
+           relaunch_date =
+             parse_date_time(relaunch_date,
+                             orders = c("ymd", "mdy")),
+           recovery_date = 
+             parse_date_time(recovery_date,
+                             orders = c("ymd", "mdy"))) |>
+    # Select columns to keep
+    select(c(site, position, logger_id, sn, initial_deployment_date,
+             relaunch_date, recovery_date, issue_flag_deployment,
+             issue_flag_relaunch, comments_for_initial_deployment,
+             comments_for_relaunch_deployment, comments_recovery)) |>
+    rename("serial_number" = "sn")
+  
+  # Make initial deployment file
+  initial <- metadata |>
+    mutate(deployment_type = "initial",
+           in_water_date = initial_deployment_date,
+           # out of water date is either relaunch date, 
+           # or if there was no relaunch, it is recovery date.
+           # coalesce() finds the first non-missing value at each position
+           out_of_water_date = coalesce(relaunch_date, recovery_date),
+           issue_flag = issue_flag_deployment,
+           comments = comments_for_initial_deployment) |>
+    select(site, position, logger_id, serial_number,
+           deployment_type, in_water_date, out_of_water_date,
+           issue_flag, comments) |>
+    # make sure dates are dates
+    mutate(out_of_water_date = as.Date(out_of_water_date),
+           in_water_date = as.Date(in_water_date))
+  
+  # Make relaunch deployment file
+  relaunch <- metadata |>
+    # Remove rows when sensor was not relaunched
+    filter(!is.na(relaunch_date)) |>
+    mutate(deployment_type = "relaunch",
+           in_water_date = relaunch_date,
+           out_of_water_date = recovery_date,
+           issue_flag = issue_flag_relaunch,
+           comments = case_when(
+             !is.na(comments_for_relaunch_deployment) & 
+               !is.na(comments_recovery) ~
+               paste(comments_for_relaunch_deployment,
+                     comments_recovery, sep = ", "),
+             !is.na(comments_for_relaunch_deployment) ~
+               comments_for_relaunch_deployment,
+             !is.na(comments_recovery) ~
+               comments_recovery,
+             TRUE ~ NA_character_
+           )) |>
+    select(site, position, logger_id, serial_number,
+           deployment_type, in_water_date, out_of_water_date,
+           issue_flag, comments) |>
+    # make sure dates are dates
+    mutate(out_of_water_date = as.Date(out_of_water_date),
+           in_water_date = as.Date(in_water_date))
+  
+  # Combine initial and relaunch files
+  metadata_long <- bind_rows(initial, relaunch) |>
+    arrange(site, position, in_water_date, logger_id)
+  
+  return(metadata_long)
+}  # END metadata cleaning function ----
+
+
+# Read and clean a logger CSV file from Google Drive ----
 #'
 #' @param file_row One row from get_all_logger_csvs_by_id() output
 #' @param metadata Metadata dataframe from read_and_clean_metadata()
@@ -62,213 +157,54 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
   # Pull out file info
   file_id <- file_row$id      # File ID for Google Drive API
   file_name <- file_row$name  # File name
-  sensor_type <- tolower(file_row$sensor_type)  # Sensor type pulled from folder name, to know how to proceed processing
-  sensor_type <- str_trim(sensor_type)
+  sensor_type <- str_trim(tolower(file_row$sensor_type))  # Sensor type pulled from folder name, to know how to proceed processing
   
   # Grab info from file name
   parts <- str_split(file_name, "_", simplify = TRUE)
-  # The first part is the site name
-  site_name <- parts[1]
-  site_name <- str_replace_all(site_name, "(?<=[a-z])(?=[A-Z])", " ") # Make site name two words, e.g., North Beach
-  print(paste("Site name:", site_name))
-  # The second part is the logger nickname = logger_id
-  logger_id <- parts[2]
-  print(paste("Logger Id:", logger_id))
-  # The third part is the initial deployment date or re-launch date
-  deployment_date <- parts[3]
-  deployment_date <- str_remove_all(deployment_date, regex(".csv", ignore_case = TRUE))  # take out the .csv ending
-  print(paste("Date deployed:", deployment_date))
-
-  # Link to metadata to pull out position in water column using clues from file name
-  position <- metadata$position[metadata$site == site_name &  
-                                  metadata$logger_id == logger_id &
-                                  metadata$initial_deployment_date == as.Date(deployment_date)]
-  # If the deployment date didn't match initial_deployment_date in metadata, try relaunch_date
-  if (length(position) == 0 || all(is.na(position))) {
-    position <- metadata$position[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$relaunch_date == as.Date(deployment_date)
-    ]
-  } 
+  # Part 1 is site name. Make Title Case
+  site_name <- str_replace_all(parts[1], "(?<=[a-z])(?=[A-Z])", " ")
+  # Part 2 is logger_id
+  file_logger_id <- parts[2]
+  # Part 3 is date deployed or relaunched
+  deployment_date <- as.Date(str_remove_all(parts[3], 
+                                            regex("\\.csv", 
+                                                  ignore_case = TRUE)))
   
-  # If there are many positions found (rare), use the first non-NA match
-  if (length(position) > 1) {
-    warning(paste("Multiple positions found. Using the first non-NA. Matches:", paste(position, collapse = ", ")))
-    position <- position[!is.na(position)][1]
-  } 
-  # If there is no position found, then it is likely not noted in metadata. 
-  if (length(position) == 0) {
-    warning(paste("No position found, defaulting to NA"))
-    position <- NA
-  }
-  print(paste("Position:", position))
+  print(paste("Site:", site_name,
+              " | Logger ID:", file_logger_id,
+              " | Date deployed:", deployment_date))
   
-  # Determine deployment type (deployment, relaunch) and get flags and comments from metadata
-  # Check if this is an initial deployment file
-  is_initial_deployment <- FALSE
-  initial_match <- metadata$initial_deployment_date[
-    metadata$site == site_name &
-      metadata$logger_id == logger_id &
-      metadata$initial_deployment_date == as.Date(deployment_date)
-  ]
-  if (length(initial_match) > 0 && !all(is.na(initial_match))) {
-    is_initial_deployment <- TRUE
+  
+  # Join logger file to metadata row
+  meta_row <- metadata |>
+    filter(site == site_name,
+           logger_id == file_logger_id,
+           as.Date(in_water_date) == deployment_date)
+  
+  # Warning if no match in metadata
+  if (nrow(meta_row) == 0) {
+    warning(paste("No metadata match for file:", file_name,
+                  "- check site name, logger_id, and deployment date in metadata sheet"))
+    return(NULL)
   }
   
-  # Check if this is a relaunch file
-  is_relaunch <- FALSE
-  relaunch_match <- metadata$relaunch_date[
-    metadata$site == site_name &
-      metadata$logger_id == logger_id &
-      metadata$relaunch_date == as.Date(deployment_date)
-  ]
-  if (length(relaunch_match) > 0 && !all(is.na(relaunch_match))) {
-    is_relaunch <- TRUE
+  # Warning if multiple matches
+  if (nrow(meta_row) > 1) {
+    warning(paste("Multiple metadata matches for:", file_name, "- using first row. Check file name and metadata sheet"))
+    meta_row <- meta_row[1, ]
   }
   
-  # Extract relevant metadata columns based on deployment type
-  if (is_initial_deployment) {
-    issue_flag <- metadata$issue_flag_deployment[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$initial_deployment_date == as.Date(deployment_date)
-    ]
-    comments <- metadata$comments_initial_deployment[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$initial_deployment_date == as.Date(deployment_date)
-    ]
-    deployment_type <- "initial"
-    
-  } else if (is_relaunch) {
-    issue_flag <- metadata$issue_flag_relaunch[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$relaunch_date == as.Date(deployment_date)
-    ]
-    
-    # For relaunch: combine relaunch and recovery comments
-    comments_relaunch <- metadata$comments_relaunch[ 
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$relaunch_date == as.Date(deployment_date)
-    ]
-    comments_recovery <- metadata$comments_recovery[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$relaunch_date == as.Date(deployment_date)
-    ]
-    
-    # Combine non-NA comments with comma separator
-    comment_parts <- c()
-    if (length(comments_relaunch) > 0 && !is.na(comments_relaunch[1])) {
-      comment_parts <- c(comment_parts, comments_relaunch[1])
-    }
-    if (length(comments_recovery) > 0 && !is.na(comments_recovery[1])) {
-      comment_parts <- c(comment_parts, comments_recovery[1])
-    }
-    
-    comments <- if (length(comment_parts) > 0) {
-      paste(comment_parts, collapse = ", ")
-    } else {
-      NA_character_
-    }
-    
-    deployment_type <- "relaunch"
-    
-  } else {
-    issue_flag <- NA_character_
-    comments <- NA_character_
-    deployment_type <- NA_character_
-    warning(paste("Could not determine if file is initial deployment or relaunch for:", file_name))
-  }
+  # Pull out values from matched metadata row
+  position <- meta_row$position
+  deployment_type <- meta_row$deployment_type
+  in_water_date <- meta_row$in_water_date
+  out_of_water_date <- meta_row$out_of_water_date
+  issue_flag <- meta_row$issue_flag
+  comments <- meta_row$comments
   
-  # Handle multiple matches
-  if (length(issue_flag) > 1) {
-    warning(paste("Multiple issue_flags found. Using the first non-NA."))
-    issue_flag <- issue_flag[!is.na(issue_flag)][1]
-  }
-  if (length(issue_flag) == 0) issue_flag <- NA_character_
-  
-  if (length(comments) > 1) {
-    warning(paste("Multiple comments found. Using the first non-NA."))
-    comments <- comments[!is.na(comments)][1]
-  }
-  if (length(comments) == 0) comments <- NA_character_
-  
-  print(paste("Deployment type:", deployment_type))
-  print(paste("Issue flag:", issue_flag))
-  print(paste("Comments:", comments))
-  
-  
-  # Grab dates for filtering out-of-water time
-  # Date + time logger was placed in water
-  # If initial deployment file, use initial_deployment_datetime
-  in_water_date <- metadata$initial_deployment_datetime[
-    metadata$site == site_name &
-      metadata$logger_id == logger_id &
-      metadata$initial_deployment_date == as.Date(deployment_date)
-  ]
-  # If re-launch file, use relaunch_deployment_datetime
-  if (length(in_water_date) == 0 || all(is.na(in_water_date))) {
-    in_water_date <- metadata$relaunch_deployment_datetime[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$relaunch_date == as.Date(deployment_date)
-    ]
-  }
-  # Set NA if there is no match
-  if (length(in_water_date) == 0) {
-    in_water_date <- NA
-    warning("No match found for date logger was placed in water. 
-            May cause issues with filtering out-of-water time.")
-  }
-  # If there are multiple matches, use the first non-NA match
-  if (length(in_water_date) > 1) {
-    warning(paste("Multiple in_water_dates found found. Using the first non-NA. Matches:", paste(in_water_date, collapse = ", ")))
-    in_water_date <- in_water_date[!is.na(in_water_date)][1]
-  } 
-  
-  # Date + time logger was taken out of water
-  # If initial deployment file, use relaunch_recovery_datetime
-  out_of_water_date <- metadata$relaunch_recovery_datetime[
-    metadata$site == site_name &
-      metadata$logger_id == logger_id &
-      metadata$initial_deployment_date == as.Date(deployment_date)
-  ]
-  # If initial deployment file has no relaunch, use recovery_datetime
-  if (length(out_of_water_date) == 0 || all(is.na(out_of_water_date))) {
-    out_of_water_date <- metadata$recovery_datetime[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$initial_deployment_date == as.Date(deployment_date)
-    ]
-  }
-  # If re-launch file, use recovery_datetime
-  if (length(out_of_water_date) == 0 || all(is.na(out_of_water_date))) {
-    out_of_water_date <- metadata$recovery_datetime[
-      metadata$site == site_name &
-        metadata$logger_id == logger_id &
-        metadata$relaunch_date == as.Date(deployment_date)
-    ]
-  }
-  # Set NA if there is no match
-  if (length(out_of_water_date) == 0) {
-    out_of_water_date <- NA
-    warning("No match found for date logger was taken out of water. 
-            May cause issues with filtering out-of-water time.")
-  }
-  # If there are multiple matches, use the first non-NA match
-  if (length(out_of_water_date) > 1) {
-    warning(paste("Multiple in_water_dates found found. Using the first non-NA. Matches:", paste(out_of_water_date, collapse = ", ")))
-    out_of_water_date <- out_of_water_date[!is.na(out_of_water_date)][1]
-  } 
-  
-  print(paste("In-water date:", in_water_date))
-  print(paste("Out-of-water date:", out_of_water_date))
-  
-  print(paste("Reading file:", file_name))
+  print(paste("Position:", position, "| Type:", deployment_type,
+              "| In:", in_water_date, "| Out:", out_of_water_date))
+  print(paste("Issue flag:", issue_flag, "| Comments:", comments))
   print(paste("Sensor type:", sensor_type))
   
   # Download csv to temp file
@@ -319,7 +255,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       setNames(c("datetime", "tidbit_temp_c")) |>
       mutate(site = site_name, 
              position = position, 
-             temp_logger_id = logger_id,
+             temp_logger_id = file_logger_id,
              issue_flag = issue_flag,
              comments = comments,
              .before = datetime) |>
@@ -392,7 +328,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       mutate(
         pH = if (has_ph_col) pH else NA_real_,
         site = site_name,
-        ph_logger_id = logger_id,
+        ph_logger_id = file_logger_id,
         position = position,
         issue_flag = issue_flag,
         comments = comments,
@@ -483,7 +419,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     
     df <- df |>
       mutate(site = site_name,
-             wl_logger_id = logger_id,
+             wl_logger_id = file_logger_id,
              position = position,
              issue_flag = issue_flag,
              comments = comments,
@@ -551,7 +487,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
                  "high_range_microsiemens_per_cm")) |>
       mutate(site = site_name,
              position = position,
-             con_logger_id = logger_id,
+             con_logger_id = file_logger_id,
              issue_flag = issue_flag,
              comments = comments,
              .before = datetime) |>
@@ -615,7 +551,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     df <- df |>
       setNames(c("datetime", "do_temp_c", "do_conc_mg_per_L")) |>
       mutate(site = site_name,
-             do_logger_id = logger_id,
+             do_logger_id = file_logger_id,
              position = position,
              issue_flag = issue_flag,
              comments = comments,
@@ -681,7 +617,7 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     if (!is.null(df)) {
       df <- df |>
         mutate(site = site_name,
-               par_logger_id = logger_id,
+               par_logger_id = file_logger_id,
                position = position,
                issue_flag = issue_flag,
                comments = comments,
@@ -716,113 +652,6 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
   unlink(temp_path)
   return(df)
 } # END read_and_clean_logger_csv function ----
-
-
-# Read and clean index logger metadata ----
-#'
-#' @param metadata_file_url URL to main index metadata google sheet
-#' @param sheet_name Name of the tab that the metadata is on
-#'
-#' @returns A clean metadata sheet to be combined with logger data
-#'
-read_and_clean_metadata <- function(metadata_file_url, sheet_name){
-  
-  # Read in metadata sheet from google drive
-  metadata_raw <- read_sheet(metadata_file_url,
-                             sheet = sheet_name,
-                             na = c("", "n/a", "#N/A"),
-                             col_types = "c")
-  
-  # Cleaning
-  metadata <- metadata_raw |>
-    clean_names() |>
-    # Rename nickname to logger_id to match logger file convention
-    rename("logger_id" = "nickname") |>
-    # Make position consistently lowercase
-    mutate(position = tolower(position)) |>
-    # Remove rows that are year separators
-    filter(!(str_detect(site, "^20\\d{2}$"))) |>
-    # Make site name capital with space. e.g., North Beach
-    mutate(site = str_replace_all(site, "(?<=[a-z])(?=[A-Z])", " ")) |>
-    # Parse dates from varying formats
-    mutate(launch_date_office = parse_date_time(launch_date_office,
-                                                orders = c("ymd", "mdy")),
-           initial_deployment_date = parse_date_time(initial_deployment_date,
-                                                     orders = c("ymd", "mdy")),
-           initial_deployment_time = str_remove(initial_deployment_time, "^~\\s*"),
-           initial_deployment_time = parse_date_time(initial_deployment_time,
-                                                     orders = c("HM", "I:M p")),
-           # Combine deployment date and time
-           initial_deployment_datetime = case_when(
-             # if no date, datetime = NA
-             is.na(initial_deployment_date) ~ as.POSIXct(NA),
-             # if no time, use the date and fill 00:00:00 for time
-             is.na(initial_deployment_time) ~ ymd_hms(paste(as.Date(initial_deployment_date),
-                                                            "00:00:00")),
-             # otherwise, combine the two 
-             TRUE ~ ymd_hms(paste(as.Date(initial_deployment_date), 
-                                  format(initial_deployment_time, "%H:%M:%S"))))) |>
-    relocate(initial_deployment_datetime, .after = initial_deployment_time) |>
-    mutate(relaunch_date = parse_date_time(relaunch_date,
-                                           orders = c("ymd", "mdy"))) |>
-    mutate(relaunch_recovery_time = if_else(site == "edmonds" &
-                                              logger_id == "DO18" &
-                                              relaunch_date == "2025-04-02",
-                                            "9:30",
-                                            relaunch_recovery_time),
-           relaunch_recovery_time = parse_date_time(relaunch_recovery_time,
-                                                    orders = c("HM", "I:M p"))) |>
-    mutate( 
-      # Combine relauch date and time
-      relaunch_recovery_datetime = case_when(
-        # if no date, datetime = NA
-        is.na(relaunch_date) ~ as.POSIXct(NA),
-        # if no time, use the date and fill 00:00:00 for time
-        is.na(relaunch_recovery_time) ~ ymd_hms(paste(as.Date(relaunch_date),
-                                                      "00:00:00")),
-        # otherwise, combine the two 
-        TRUE ~ ymd_hms(paste(as.Date(relaunch_date), 
-                             format(relaunch_recovery_time, "%H:%M:%S")))), 
-      .after = relaunch_recovery_time) |>
-    mutate(
-      # Relauch Deployment Datetime
-      relaunch_deployment_time = str_remove(relaunch_deployment_time, "^~\\s*"),
-      relaunch_deployment_time = parse_date_time(relaunch_deployment_time,
-                                                 orders = c("HM", "I:M p", "I:M:S p"))) |>
-    mutate(
-      relaunch_deployment_datetime = case_when(
-        # if no date, datetime = NA
-        is.na(relaunch_date) ~ as.POSIXct(NA),
-        # if no time, use the date and fill 00:00:00 for time
-        is.na(relaunch_deployment_time) ~ ymd_hms(paste(as.Date(relaunch_date),
-                                                        "00:00:00")),
-        # otherwise, combine the two 
-        TRUE ~ ymd_hms(paste(as.Date(relaunch_date), 
-                             format(relaunch_deployment_time, "%H:%M:%S")))), 
-      .after = relaunch_deployment_time) |>
-    mutate(relaunch_data_readout_date = parse_date_time(relaunch_data_readout_date,
-                                                        orders = c("ymd", "mdy"))) |>
-    mutate(recovery_date = parse_date_time(recovery_date,
-                                           orders = c("ymd", "mdy")),
-           recovery_time = str_remove(recovery_time, "^~\\s*"),
-           recovery_time = parse_date_time(recovery_time,
-                                           orders = c("HM", "I:M p", "I:M:S p")),
-           data_readout_date = parse_date_time(data_readout_date,
-                                               orders = c("ymd", "mdy"))) |>
-    mutate(
-      recovery_datetime = case_when(
-        # if no date, datetime = NA
-        is.na(recovery_date) ~ as.POSIXct(NA),
-        # if no time, use the date and fill 00:00:00 for time
-        is.na(recovery_time) ~ ymd_hms(paste(as.Date(recovery_date),
-                                             "00:00:00")),
-        # otherwise, combine the two 
-        TRUE ~ ymd_hms(paste(as.Date(recovery_date), 
-                             format(recovery_time, "%H:%M:%S")))), 
-      .after = recovery_time)
-
-  return(metadata)
-}  # END metadata cleaning function ----
 
 
 # MAIN FUNCTION: Incremental update to processes new files ----
@@ -915,43 +744,41 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
   new_par_data <- list()
   new_con_data <- list()
   
-  # Track successfully processed files
-  successfully_processed_files <- character(0)
+  # Track successfully and unsuccessfully processed files
+  successfully_processed_files   <- character(0)
+  unsuccessfully_processed_files <- character(0)
   
   # Process each new file
   for (i in seq_len(nrow(files_to_process))) {
     file_row <- files_to_process[i, ]
-    sensor_type <- tolower(file_row$sensor_type)
-    sensor_type <- str_trim(sensor_type)
+    sensor_type <- str_trim(tolower(file_row$sensor_type))
     
     message(paste("Processing new file", i, "of", nrow(files_to_process), ":", file_row$name))
     
-    tryCatch({  # trying this new way of throwing warnings/errors
+    tryCatch({ # trying this new way of throwing warnings/errors
       cleaned_data <- read_and_clean_logger_csv(file_row, metadata)
       
-      # Store in appropriate list
-      if (sensor_type == "temperature") {
-        new_temp_data <- append(new_temp_data, list(cleaned_data))
-      } else if (sensor_type == "ph") {
-        new_ph_data <- append(new_ph_data, list(cleaned_data))
-      } else if (sensor_type == "dissolved oxygen") {
-        new_do_data <- append(new_do_data, list(cleaned_data))
-      } else if (sensor_type == "water level") {
-        new_wl_data <- append(new_wl_data, list(cleaned_data))
-      } else if (sensor_type == "par") {
-        new_par_data <- append(new_par_data, list(cleaned_data))
-      } else if (sensor_type == "conductivity") {
-        new_con_data <- append(new_con_data, list(cleaned_data))
+      if (is.null(cleaned_data)) {
+        message(paste("Skipping file (no metadata match):", file_row$name,
+                      "- fix metadata entry and rerun to process this file"))
+        unsuccessfully_processed_files <- c(unsuccessfully_processed_files, file_row$name)
+      } else {
+        if      (sensor_type == "temperature")      new_temp_data <- append(new_temp_data, list(cleaned_data))
+        else if (sensor_type == "ph")               new_ph_data   <- append(new_ph_data,   list(cleaned_data))
+        else if (sensor_type == "dissolved oxygen") new_do_data   <- append(new_do_data,   list(cleaned_data))
+        else if (sensor_type == "water level")      new_wl_data   <- append(new_wl_data,   list(cleaned_data))
+        else if (sensor_type == "par")              new_par_data  <- append(new_par_data,  list(cleaned_data))
+        else if (sensor_type == "conductivity")     new_con_data  <- append(new_con_data,  list(cleaned_data))
+        
+        successfully_processed_files <- c(successfully_processed_files, file_row$name)
+        message(paste("Successfully processed:", file_row$name))
       }
-      
-      # Only add to successfully processed list if we get here without error
-      successfully_processed_files <- c(successfully_processed_files, file_row$name)
-      message(paste("Successfully processed:", file_row$name))
       
     }, error = function(e) {
       warning(paste("Error processing file", file_row$name, ":", e$message))
       message("Check that file name and metadata are as expected")
       message(paste("File", file_row$name, "will be retried on next run"))
+      unsuccessfully_processed_files <<- c(unsuccessfully_processed_files, file_row$name)
     })
   }
   
@@ -986,13 +813,7 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
     message(paste("Processing", sensor_name, "data..."))
     
     # Combine new and existing data
-    if (!is.null(old_data) && !is.null(new_data)) {
-      combined_data <- bind_rows(old_data, new_data)
-    } else if (!is.null(new_data)) {
-      combined_data <- new_data
-    } else {
-      combined_data <- old_data
-    }
+    combined_data <- bind_rows(old_data, new_data)
     
     # Round timestamps to nearest 15 minutes and handle duplicates
     combined_data <- combined_data |>
@@ -1010,92 +831,29 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
       group_by(site, position, datetime) |>
       summarise(across(everything(), ~ first(na.omit(.x))[1]), .groups = "drop")
     
-    # For gaps filled with NA, search metadata for matching issue_flags and comments
-    # Create metadata lookup for this sensor
-    metadata_periods <- metadata |>
-      select(site, logger_id, position,
-             initial_deployment_datetime, relaunch_recovery_datetime,
-             relaunch_deployment_datetime, recovery_datetime,
-             issue_flag_deployment, issue_flag_relaunch,
-             comments_initial_deployment, comments_relaunch, comments_recovery)
+    # Fill issue_flag and comments for rows with missing data
+    # This section will match each row with missing data to the
+    # corresponding deployment period in the metadata
+    meta_lookup <- metadata |>
+      # Select just columns needed for matching and filtering
+      select(site, position, in_water_date, out_of_water_date, issue_flag, comments) |>
+      # Make dates POSIXct to match sensor data type
+      mutate(in_water_date = as.POSIXct(in_water_date),
+             out_of_water_date = as.POSIXct(out_of_water_date))
     
-    # Fill in metadata for gap rows
-    combined_data <- combined_data |>
-      rowwise() |>
-      mutate(
-        # If issue_flag or comments is NA, try to fill from metadata
-        needs_metadata = is.na(issue_flag) | is.na(comments),
-        gap_metadata = list(if (needs_metadata) {
-          # Find matching deployment period using current row's site and position
-          current_site <- site
-          current_position <- position
-          current_datetime <- datetime
-          
-          matching <- metadata_periods |>
-            filter(
-              site == current_site,
-              position == current_position
-            ) |>
-            filter(
-              # Falls within initial deployment
-              (current_datetime >= initial_deployment_datetime & 
-                 current_datetime <= relaunch_recovery_datetime) |
-                # Falls within relaunch deployment  
-                (current_datetime >= relaunch_deployment_datetime &
-                   current_datetime <= recovery_datetime)
-            )
-          
-          if (nrow(matching) > 0) {
-            row <- matching[1, ]
-            
-            # Determine which period
-            in_initial <- !is.na(row$initial_deployment_datetime) &&
-              current_datetime >= row$initial_deployment_datetime &&
-              (!is.na(row$relaunch_recovery_datetime) && 
-                 current_datetime <= row$relaunch_recovery_datetime)
-            
-            if (in_initial) {
-              list(
-                flag = row$issue_flag_deployment,
-                comment = row$comments_initial_deployment
-              )
-            } else {
-              # Combine relaunch and recovery comments
-              comment_parts <- c()
-              if (!is.na(row$comments_relaunch)) {
-                comment_parts <- c(comment_parts, row$comments_relaunch)
-              }
-              if (!is.na(row$comments_recovery)) {
-                comment_parts <- c(comment_parts, row$comments_recovery)
-              }
-              
-              list(
-                flag = row$issue_flag_relaunch,
-                comment = if (length(comment_parts) > 0) {
-                  paste(comment_parts, collapse = ", ")
-                } else {
-                  NA_character_
-                }
-              )
-            }
-          } else {
-            list(flag = NA_character_, comment = NA_character_)
-          }
-        } else {
-          # Already has metadata, keep it
-          list(flag = issue_flag, comment = comments)
-        }
-        )
-      ) |>
-      ungroup() |>
-      mutate(
-        issue_flag = sapply(gap_metadata, function(x) x$flag),
-        comments = sapply(gap_metadata, function(x) x$comment)
-      ) |>
-      select(-needs_metadata, -gap_metadata)
     
-    # Sort and clean
     combined_data <- combined_data |>
+      left_join(
+        meta_lookup |> rename(flag_fill = issue_flag, comments_fill = comments),
+        join_by(site, position,
+                datetime >= in_water_date,
+                datetime <  out_of_water_date)
+      ) |>
+      mutate(
+        issue_flag = coalesce(issue_flag, flag_fill),
+        comments   = coalesce(comments,   comments_fill)
+      ) |>
+      select(-flag_fill, -comments_fill, -in_water_date, -out_of_water_date) |>
       arrange(site, position, datetime) |>
       distinct()
     
@@ -1103,8 +861,8 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
     final_data[[sensor]] <- combined_data
   }
   
-
-  # 10. Save updated data and tracking info
+  
+  # 4. Save updated data and tracking info
   message("Saving updated data...")
   
   # Create data folder if it doesn't exist
@@ -1127,9 +885,19 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
   updated_processed_files <- unique(c(processed_files, successfully_processed_files))
   saveRDS(updated_processed_files, tracking_file_path)
   
+  # Save unsuccessful files list for review 
+  unsuccessful_file_path <- here::here("data", "unsuccessful_files.rds")
+  saveRDS(unsuccessfully_processed_files, unsuccessful_file_path)
+  
   message(paste("Processing complete!"))
   message(paste("Successfully processed", length(successfully_processed_files), "new files"))
   message(paste("Failed to process", nrow(files_to_process) - length(successfully_processed_files), "files"))
+  
+  # Print unsuccessful files for review
+  if (length(unsuccessfully_processed_files) > 0) {
+    message("The following files were not processed and need review:")
+    for (f in unsuccessfully_processed_files) message(paste(" -", f))
+  }
   
   # Print summary for each sensor type
   for (i in seq_along(sensor_types)) {
@@ -1141,4 +909,4 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
   }
   
   return(final_data)
-}
+} # END update_logger_data_incremental ----
