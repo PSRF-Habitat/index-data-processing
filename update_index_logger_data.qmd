@@ -169,19 +169,19 @@ pushing `command + return` on mac or `ctrl + enter` on pc.
 ```{r}
 ########## Add new files to existing file ##########
 
-data <- update_logger_data_incremental(root_folder_id = root_folder_id,
-                                       metadata_file_url = metadata_file_url,
-                                       sheet_name = sheet_name)
+# data <- update_logger_data_incremental(root_folder_id = root_folder_id,
+#                                        metadata_file_url = metadata_file_url,
+#                                        sheet_name = sheet_name)
 
 
 
 
 ########## Re-process all old files in addition to new files  ##########
 
-# data <- update_logger_data_incremental(root_folder_id = root_folder_id,
-#                                        metadata_file_url = metadata_file_url,
-#                                        sheet_name = sheet_name,
-#                                        force_reprocess = TRUE)
+data <- update_logger_data_incremental(root_folder_id = root_folder_id,
+                                       metadata_file_url = metadata_file_url,
+                                       sheet_name = sheet_name,
+                                       force_reprocess = TRUE)
 ```
 
 ## Step 4: Export as CSV to Google Drive
@@ -244,10 +244,10 @@ Surface:
 ```{r}
 #| code-fold: true
 # Surface temperature by site
-data |>
+data$temp |>
   filter(position == "surface") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = tidbit_temp_c, color = temp_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = tidbit_temp_c), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "SST by Site",
        x = "Date",
@@ -263,10 +263,10 @@ Surface:
 ```{r}
 #| code-fold: true
 # pH surface
-data |>
+data$ph |>
   filter(position == "surface") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = pH), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Surface pH by Site",
        x = "Date",

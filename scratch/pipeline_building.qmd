@@ -841,13 +841,16 @@ df <- update_logger_data_incremental(root_folder_id, metadata_file_url, sheet_na
 view(df$temp)
 
 # quick plot to check
-ggplot(df$temp |>
-         filter(position == "surface")) +
-  geom_line(aes(x = datetime, y = tidbit_temp_c, color = site))
+ggplot(temp |>
+         filter(position == "surface",
+                site == "Edmonds")) +
+  geom_line(aes(x = datetime, y = tidbit_temp_c, color = issue_flag))
 
-ggplot(df$con |>
-         filter(position == "surface")) +
-  geom_line(aes(x = datetime, y = high_range_microsiemens_per_cm, color = site))
+ggplot(con |>
+         filter(position == "surface",
+                site == "Edmonds",
+                issue_flag == "Fouling")) +
+  geom_line(aes(x = datetime, y = high_range_microsiemens_per_cm, color = issue_flag))
 ```
 
 cool! now ... 
@@ -859,7 +862,263 @@ time to work through flagging issues. I want to
   - "Data- Invalid", "Instrument- Recovered from bottom"
 - Add a column with the issue flag - done
 - Add a column with any notes - done
+- Add flags for points that are in the top and bottom 1% of data (look for outliers) - did this, do not think it is helpful
+- Add flags for points where the absolute difference from the previous observation is in the top 1% of all absolute differences - also did this... still wondering about when this might be helpful, not ready to toss out yet
 
-I think then I will write a separate script that will walk through manually checking fouling flags. 
+sensor specific:
+- DO cannot be < 0
+
+I think then I will write a separate script that will walk through manually checking fouling flags.
+
+
+
+```{r}
+# Test 1% flags
+flagged_do <- do |>
+  arrange(site, position, datetime) |>
+  group_by(site, position) |>
+  mutate(
+    # Flag outliers
+    outlier_flag = !is.na(do_conc_mg_per_L) &
+      (do_conc_mg_per_L < quantile(do_conc_mg_per_L, 0.01, na.rm = TRUE) |
+         do_conc_mg_per_L > quantile(do_conc_mg_per_L, 0.99, na.rm = TRUE)),
+    
+    # Flag big jumps
+    abs_diff = abs(do_conc_mg_per_L - lag(do_conc_mg_per_L)),
+    spike_flag = !is.na(abs_diff) & 
+      abs_diff > quantile(abs_diff, 0.99, na.rm = TRUE)
+  )
+
+
+# Create a separate dataframe of flagged periods
+issue_periods <- con |>
+  filter(site == "Jefferson Head",
+         position == "surface",
+         !is.na(issue_flag)) |>
+  arrange(datetime) |>
+  mutate(
+    # Calculate time gap from previous row
+    time_gap  = as.numeric(difftime(datetime, lag(datetime), units = "hours")),
+    # Start a new group if the flag changes OR there is a gap larger than expected
+    # (e.g. > 1 hour for 15-min data, adjust threshold if needed)
+    new_group = is.na(time_gap) | issue_flag != lag(issue_flag, default = "") | time_gap > 1,
+    group_id  = cumsum(new_group)
+  ) |>
+  group_by(site, position, issue_flag, group_id) |>
+  summarise(start = min(datetime),
+            end   = max(datetime),
+            .groups = "drop")
+
+issue_periods <- issue_periods |>
+  bind_rows(
+    tibble(
+      site           = "Jefferson Head",
+      position       = "surface",
+      issue_flag     = "Data- Incomplete file",
+      group_id       = NA_real_,
+      start          = as.POSIXct("2025-06-05"),
+      end            = as.POSIXct("2025-08-26")
+    )
+  )
+
+# plot
+jh_surface_con_issues <- ggplot(con |>
+         filter(site == "Jefferson Head",
+                position == "surface") |>
+         mutate(year = year(datetime)),
+       aes(x = datetime, y = high_range_microsiemens_per_cm)) +
+  geom_rect(data = issue_periods |> mutate(year = year(start)),
+            aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = issue_flag),
+            inherit.aes = FALSE, alpha = 0.2) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  labs(title = "Jefferson Head, Surface, Conductivity (Raw)",
+       subtitle = "Data issues for deployments highlighted behind points",
+       fill = "Issue Flag") +
+  facet_wrap(~ year, scales = "free_x", ncol = 1) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title.position = "plot")
+
+ggsave(here::here("figures", "jh_surface_con_issues.png"), jh_surface_con_issues,
+       width = 12, height = 7)
+
+```
+
+## Issue plots for each site / sensor type / position
+
+```{r}
+# Get unique site/position combos in con
+site_pos_combos <- con |> distinct(site, position)
+
+plot_sensor_issues <- function(data, site_name, pos, sensor_col, y_label, title_sensor) {
+  
+  # Filter to this site/position
+  plot_data <- data |>
+    filter(site == site_name,
+           position == pos)
+  
+  # Skip if no data for this combo
+  if (nrow(plot_data) == 0) {
+    message(paste("No data found for:", site_name, pos, "- skipping"))
+    return(NULL)
+  }
+  
+  # Build flagged periods
+  issue_periods <- plot_data |>
+    filter(!is.na(issue_flag)) |>
+    arrange(datetime) |>
+    mutate(
+      time_gap  = as.numeric(difftime(datetime, lag(datetime), units = "hours")),
+      new_group = is.na(time_gap) | issue_flag != lag(issue_flag, default = "") | time_gap > 1,
+      group_id  = cumsum(new_group)
+    ) |>
+    group_by(site, position, issue_flag, group_id) |>
+    summarise(start = min(datetime),
+              end   = max(datetime),
+              .groups = "drop")
+  
+  # Plot
+  ggplot(plot_data |> mutate(year = year(datetime)),
+         aes(x = datetime, y = .data[[sensor_col]])) +
+    geom_rect(data = issue_periods |> mutate(year = year(start)),
+              aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = issue_flag),
+              inherit.aes = FALSE, alpha = 0.2) +
+    geom_point(alpha = 0.3, size = 0.8) +
+    labs(title    = paste0(site_name, ", ", str_to_title(pos), ", ", title_sensor, " (Raw)"),
+         subtitle = "Data issues for deployments highlighted behind points",
+         y        = y_label,
+         fill     = "Issue Flag") +
+    facet_wrap(~ year, scales = "free_x", ncol = 1) +
+    theme_minimal(base_size = 12) +
+    theme(plot.title.position = "plot")
+}
+
+# Generate a plot for each site/position combo in con
+con_plots <- pmap(site_pos_combos, function(site, position) {
+  plot_sensor_issues(con, site, position,
+                     sensor_col   = "high_range_microsiemens_per_cm",
+                     y_label      = "Conductivity (µS/cm)",
+                     title_sensor = "Conductivity")
+})
+
+# Name the list for easy reference
+names(con_plots) <- paste(site_pos_combos$site, site_pos_combos$position, sep = " - ")
+
+# View them one at a time by index or name
+con_plots[[1]]
+con_plots[["Jefferson Head - surface"]]
+
+# Or scroll through all at once
+walk(con_plots[!sapply(con_plots, is.null)], print)
+
+# Con check
+con |>
+  filter(site == "Squaxin Island",
+         position == "bottom",
+         con_logger_id == "CON17") |>
+  distinct(issue_flag)
+
+metadata |>
+  filter(site == "Squaxin Island",
+         position == "bottom",
+         logger_id == "CON17")
+
+metadata |>
+  filter(site == "Squaxin Island",
+         position == "bottom") |>
+  select(site, position, logger_id, deployment_type, in_water_date, out_of_water_date, issue_flag)
+```
+
+3/3/26 - leaving off here. things are wonky bringing in issue flags. need an indication in the metadata of sensor type to match with each csv. otherwise it will pull flags from all site/position/in water date combos... aka the entire sensor package
+
+going to add a column in when I am cleaning data in pipeline, using the nickname code. will require whoever names these to stay consistent with the naming scheme (e.g., conductivity loggers need to stay CON##)
+
+## Reworking metadata
+
+Code testing converting the metadata to tidy format before ingesting as a function into the pipeline.
+
+```{r}
+# Read in metadata 
+metadata_raw <- read_sheet(metadata_file_url,
+                             sheet = sheet_name,
+                             na = c("", "n/a", "#N/A"),
+                             col_types = "c")
+```
+
+
+```{r}
+# Some general cleaning pulled from existing function
+metadata <- metadata_raw |>
+  clean_names() |>
+  # Rename nickname to logger_id to match logger file convention
+  rename("logger_id" = "nickname") |>
+  # Make position consistently lowercase
+  mutate(position = tolower(position)) |>
+  # Remove rows that are year separators
+  filter(!(str_detect(site, "^20\\d{2}$"))) |>
+  # Make site name capital with space. e.g., North Beach
+  mutate(site = str_replace_all(site, "(?<=[a-z])(?=[A-Z])", " ")) |>
+  # Parse dates from varying formats
+  mutate(launch_date_office = parse_date_time(launch_date_office,
+                                              orders = c("ymd", "mdy")),
+         initial_deployment_date = parse_date_time(initial_deployment_date,
+                                                   orders = c("ymd", "mdy")))
+
+# Select columns to keep
+metadata <- metadata |>
+  select(c(site, position, logger_id, sn, initial_deployment_date, relaunch_date,
+           recovery_date, issue_flag_deployment, issue_flag_relaunch,
+           comments_for_initial_deployment, comments_for_relaunch_deployment)) |>
+  rename("serial_number" = "sn")
+```
+
+To make deployment and relaunch have their own rows, I am going to first split the metadata into two dataframes, one for inital and one for relaunch. then i will stack the rows
+
+```{r}
+# Make initial file
+initial <- metadata |>
+  mutate(deployment_type = "initial",
+         in_water_date = initial_deployment_date,
+         # out of water date is either relaunch date, 
+         # or if there was no relaunch, it is recovery date.
+         # coalesce() finds the first non-missing value at each position
+         out_of_water_date = coalesce(relaunch_date, recovery_date),
+         issue_flag = issue_flag_deployment,
+         comments = comments_for_initial_deployment) |>
+  select(site, position, logger_id, serial_number,
+         deployment_type, in_water_date, out_of_water_date,
+         issue_flag, comments) |>
+  # make sure dates are dates
+  mutate(out_of_water_date = as.Date(out_of_water_date),
+         in_water_date = as.Date(in_water_date))
+
+# Make relaunch file
+relaunch <- metadata |>
+  # Remove rows when sensor was not relaunched
+  filter(!is.na(relaunch_date)) |>
+  mutate(deployment_type = "relaunch",
+         in_water_date = relaunch_date,
+         out_of_water_date = recovery_date,
+         issue_flag = issue_flag_relaunch,
+         comments = comments_for_relaunch_deployment) |>
+  select(site, position, logger_id, serial_number,
+         deployment_type, in_water_date, out_of_water_date,
+         issue_flag, comments) |>
+  # make sure dates are dates
+  mutate(out_of_water_date = as.Date(out_of_water_date),
+         in_water_date = as.Date(in_water_date))
+
+# Combine initial and relaunch files
+metadata_long <- bind_rows(initial, relaunch) |>
+  arrange(site, position, logger_id, in_water_date)
+```
+
+Test from updated function:
+
+```{r}
+metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
+```
+
+I think this is working as expected! Now I need to change the logic in the logger csv cleaning to match new metadata style
+
 
 

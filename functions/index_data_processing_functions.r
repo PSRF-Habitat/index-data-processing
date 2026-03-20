@@ -143,6 +143,19 @@ read_and_clean_metadata <- function(metadata_file_url, sheet_name){
   metadata_long <- bind_rows(initial, relaunch) |>
     arrange(site, position, in_water_date, logger_id)
   
+  # Add logger type column
+  metadata_long <- metadata_long |>
+    mutate(logger_type = case_when(
+      grepl("^T\\d", logger_id) ~ "temperature",
+      grepl("^WLBT|^WL|^TP", logger_id) ~ "water level",
+      logger_id == "AIR" ~ "water level",
+      grepl("^CON", logger_id) ~ "conductivity",
+      grepl("^DO", logger_id) ~ "dissolved oxygen",
+      grepl("^pH", logger_id) ~ "ph",
+      grepl("^PAR|^PSRF|^DNR", logger_id) ~ "par",
+      .default = NA
+    ))
+  
   return(metadata_long)
 }  # END metadata cleaning function ----
 
@@ -255,7 +268,8 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       setNames(c("datetime", "tidbit_temp_c")) |>
       mutate(site = site_name, 
              position = position, 
-             temp_logger_id = file_logger_id,
+             logger_id = file_logger_id,
+             logger_type = "temperature",
              issue_flag = issue_flag,
              comments = comments,
              .before = datetime) |>
@@ -328,7 +342,8 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
       mutate(
         pH = if (has_ph_col) pH else NA_real_,
         site = site_name,
-        ph_logger_id = file_logger_id,
+        logger_id = file_logger_id,
+        logger_type = "ph",
         position = position,
         issue_flag = issue_flag,
         comments = comments,
@@ -419,7 +434,8 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     
     df <- df |>
       mutate(site = site_name,
-             wl_logger_id = file_logger_id,
+             logger_id = file_logger_id,
+             logger_type = "water level",
              position = position,
              issue_flag = issue_flag,
              comments = comments,
@@ -487,7 +503,8 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
                  "high_range_microsiemens_per_cm")) |>
       mutate(site = site_name,
              position = position,
-             con_logger_id = file_logger_id,
+             logger_id = file_logger_id,
+             logger_type = "conductivity",
              issue_flag = issue_flag,
              comments = comments,
              .before = datetime) |>
@@ -551,7 +568,8 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     df <- df |>
       setNames(c("datetime", "do_temp_c", "do_conc_mg_per_L")) |>
       mutate(site = site_name,
-             do_logger_id = file_logger_id,
+             logger_id = file_logger_id,
+             logger_type = "dissolved oxygen",
              position = position,
              issue_flag = issue_flag,
              comments = comments,
@@ -617,7 +635,8 @@ read_and_clean_logger_csv <- function(file_row, metadata) {
     if (!is.null(df)) {
       df <- df |>
         mutate(site = site_name,
-               par_logger_id = file_logger_id,
+               logger_id = file_logger_id,
+               logger_type = "par",
                position = position,
                issue_flag = issue_flag,
                comments = comments,
@@ -836,24 +855,24 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
     # corresponding deployment period in the metadata
     meta_lookup <- metadata |>
       # Select just columns needed for matching and filtering
-      select(site, position, in_water_date, out_of_water_date, issue_flag, comments) |>
+      select(site, position, logger_type, 
+             in_water_date, out_of_water_date, issue_flag, comments) |>
       # Make dates POSIXct to match sensor data type
       mutate(in_water_date = as.POSIXct(in_water_date),
              out_of_water_date = as.POSIXct(out_of_water_date))
     
     
     combined_data <- combined_data |>
-      left_join(
-        meta_lookup |> rename(flag_fill = issue_flag, comments_fill = comments),
-        join_by(site, position,
-                datetime >= in_water_date,
-                datetime <  out_of_water_date)
-      ) |>
-      mutate(
-        issue_flag = coalesce(issue_flag, flag_fill),
-        comments   = coalesce(comments,   comments_fill)
-      ) |>
-      select(-flag_fill, -comments_fill, -in_water_date, -out_of_water_date) |>
+      left_join(meta_lookup |> 
+                  rename(flag_fill = issue_flag, 
+                         comments_fill = comments),
+                join_by(site, position, logger_type,
+                        datetime > in_water_date,
+                        datetime < out_of_water_date)) |>
+      mutate(issue_flag = coalesce(issue_flag, flag_fill),
+             comments = coalesce(comments, comments_fill)) |>
+      select(-flag_fill, -comments_fill, -in_water_date, -out_of_water_date,
+             -logger_type) |>
       arrange(site, position, datetime) |>
       distinct()
     
