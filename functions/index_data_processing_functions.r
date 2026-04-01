@@ -160,6 +160,81 @@ read_and_clean_metadata <- function(metadata_file_url, sheet_name){
 }  # END metadata cleaning function ----
 
 
+#' Pre-Run Check: Identify logger files with NO match in metadata ----
+#'
+#' Run this before updating the main logger file to catch all CSVs in the Drive that
+#' will not be processed successfully due to missing metadata matches
+#' 
+#' Use this list to check for errors: Site name, logger ID, and dates must match perfectly in
+#' file name and metadata
+#' 
+#' @param root_folder_id The ID of the folder containing sensor subfolders (e.g., "Temperature", "pH")
+#' @param metadata_file_url URL to main index metadata google sheet
+#' @param sheet_name Name of the tab that the metadata is on
+#' 
+#' @returns A data frame of unmatched files
+#'
+prerun_check <- function(root_folder_id, metadata_file_url, sheet_name) {
+  
+  message("Running pre-check")
+  
+  # Get all files from Drive
+  message("Scanning Google Drive for files...")
+  all_files <- get_all_logger_csvs_by_id(root_folder_id)
+  message(paste("Found", nrow(all_files), "total files in Drive"))
+  
+  # Load metadata
+  message("Loading metadata...")
+  metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
+  
+  # Parse file name components for all files (same logic as read_and_clean_logger_csv)
+  file_info <- all_files |>
+    mutate(
+      parts = str_split(name, "_", simplify = TRUE),
+      site_name = str_replace_all(parts[, 1], "(?<=[a-z])(?=[A-Z])", " "),
+      file_logger_id = parts[, 2],
+      deployment_date = as.Date(str_remove_all(parts[, 3], regex("\\.csv", ignore_case = TRUE)))
+    ) |>
+    select(-parts)
+  
+  # Attempt to match each file to metadata
+  unmatched <- file_info |>
+    rowwise() |>
+    mutate(
+      n_matches = nrow(
+        metadata |>
+          filter(site == site_name,
+                 logger_id == file_logger_id,
+                 as.Date(in_water_date) == deployment_date)
+      ),
+      match_status = case_when(
+        n_matches == 0 ~ "no match",
+        n_matches > 1  ~ "multiple matches",
+        TRUE ~ "ok"
+      )
+    ) |>
+    ungroup() |>
+    filter(match_status != "ok") |>
+    select(match_status, name, sensor_type, site_name, file_logger_id, deployment_date)
+  
+  # Report results
+  if (nrow(unmatched) == 0) {
+    message("All files have exactly one metadata match. Good to go!")
+  } else {
+    message(paste(nrow(unmatched), "file(s) will not be processed:"))
+    message(paste0(
+      "\n  - no match:          ", sum(unmatched$match_status == "no match"),
+      "\n  - multiple matches:  ", sum(unmatched$match_status == "multiple matches")
+    ))
+    message("Fix these in the metadata sheet before running the pipeline.")
+    print(unmatched)
+  }
+  
+  return(invisible(unmatched))
+  
+} # END prerun check function ----
+
+
 # Read and clean a logger CSV file from Google Drive ----
 #'
 #' @param file_row One row from get_all_logger_csvs_by_id() output
@@ -834,6 +909,11 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
     # Combine new and existing data
     combined_data <- bind_rows(old_data, new_data)
     
+    
+    # CHECK -- DELETE LATER
+    combined_data <- bind_rows(old_data, new_data)
+    message(paste("Columns after bind_rows:", paste(names(combined_data), collapse = ", ")))  # temp diagnostic
+    
     # Round timestamps to nearest 15 minutes and handle duplicates
     combined_data <- combined_data |>
       mutate(datetime = round_date(datetime, "15 minutes")) |>
@@ -871,8 +951,7 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
                         datetime < out_of_water_date)) |>
       mutate(issue_flag = coalesce(issue_flag, flag_fill),
              comments = coalesce(comments, comments_fill)) |>
-      select(-flag_fill, -comments_fill, -in_water_date, -out_of_water_date,
-             -logger_type) |>
+      select(-flag_fill, -comments_fill, -in_water_date, -out_of_water_date) |>
       arrange(site, position, datetime) |>
       distinct()
     
