@@ -114,16 +114,16 @@ Un-comment whichever group you would like to process.
 Replace the values in the quotation marks `" "` if necessary.
 
 ```{r}
-# ######### PSRF Sites ##########
-# # Folder to search in for logger files. Currently named "csvfiles" in Drive
-# # Folder ID found after the final / in the folder's URL
-# root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv"
-# 
-# # Link to the metadata sheet
-# metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098"
-# 
-# # Name of the tab with the file metadata
-# sheet_name = " Deployments_IndexOnly"
+######### PSRF Sites ##########
+# Folder to search in for logger files. Currently named "csvfiles" in Drive
+# Folder ID found after the final / in the folder's URL
+root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv"
+
+# Link to the metadata sheet
+metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098"
+
+# Name of the tab with the file metadata
+sheet_name = " Deployments_IndexOnly"
 
 
 # ######### Reef Check Sites ##########
@@ -165,10 +165,19 @@ Replace the values in the quotation marks `" "` if necessary.
 
 Before running the full pipeline, run this chunk to check that all files in the Drive folder have a matching entry in the metadata sheet. Files without a match will be skipped during the next processing stage, so catching them here saves you from running the full pipeline only to find files were missed.
 
+This chunk will also check for metadata entries with missing in water or out of water dates, which are important to fill in, else be silently filtered out of the final dataset.
+
 ```{r}
-prerun_check(root_folder_id = root_folder_id,
+# Run metadata & file name check
+checks <- prerun_check(root_folder_id = root_folder_id,
                 metadata_file_url = metadata_file_url,
                 sheet_name = sheet_name)
+
+# See metadata rows with missing dates
+View(checks$missing_dates)
+
+# See files that will not be processed
+View(checks$unmatched)
 ```
 
 If any files are flagged, fix their entries in the metadata sheet before
@@ -193,20 +202,20 @@ the line by placing your cursor after the closing parenthesis `)` and
 pushing `command + return` on mac or `ctrl + enter` on pc.
 
 ```{r}
-########## Add new files to existing file ##########
-
-data <- update_logger_data_incremental(root_folder_id = root_folder_id,
-                                        metadata_file_url = metadata_file_url,
-                                        sheet_name = sheet_name)
+# ########## Add new files to existing file ##########
+# 
+# data <- update_logger_data_incremental(root_folder_id = root_folder_id,
+#                                         metadata_file_url = metadata_file_url,
+#                                         sheet_name = sheet_name)
 
 
 
 ########## Re-process all old files in addition to new files  ##########
 
-# data <- update_logger_data_incremental(root_folder_id = root_folder_id,
-#                                        metadata_file_url = metadata_file_url,
-#                                        sheet_name = sheet_name,
-#                                        force_reprocess = TRUE)
+data <- update_logger_data_incremental(root_folder_id = root_folder_id,
+                                       metadata_file_url = metadata_file_url,
+                                       sheet_name = sheet_name,
+                                       force_reprocess = TRUE)
 ```
 
 ## Step 5: Export as CSV to Google Drive
@@ -297,7 +306,6 @@ data$ph |>
        x = "Date",
        y = "pH") +
   theme_minimal()
-
 ```
 
 Bottom:
@@ -554,3 +562,4 @@ data |>
   ) +
   theme_minimal()
 ```
+

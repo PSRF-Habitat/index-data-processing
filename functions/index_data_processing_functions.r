@@ -168,6 +168,9 @@ read_and_clean_metadata <- function(metadata_file_url, sheet_name){
 #' Use this list to check for errors: Site name, logger ID, and dates must match perfectly in
 #' file name and metadata
 #' 
+#' This run will also check for missing metadata entries. Missing information in the metadata
+#' could cause the pipeline to silently fail
+#' 
 #' @param root_folder_id The ID of the folder containing sensor subfolders (e.g., "Temperature", "pH")
 #' @param metadata_file_url URL to main index metadata google sheet
 #' @param sheet_name Name of the tab that the metadata is on
@@ -186,6 +189,17 @@ prerun_check <- function(root_folder_id, metadata_file_url, sheet_name) {
   # Load metadata
   message("Loading metadata...")
   metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
+  
+  # Check for missing deployment dates in metadata
+  missing_dates <- metadata |>
+    filter(is.na(in_water_date) | is.na(out_of_water_date)) # |>
+   # select(site, position, logger_id, logger_type, in_water_date, out_of_water_date)
+  
+  if (nrow(missing_dates) > 0) {
+    message(paste(nrow(missing_dates), "metadata row(s) have missing in_water_date or out_of_water_date."))
+  } else {
+    message("All metadata rows have valid deployment dates.")
+  }
   
   # Parse file name components for all files (same logic as read_and_clean_logger_csv)
   file_info <- all_files |>
@@ -214,7 +228,7 @@ prerun_check <- function(root_folder_id, metadata_file_url, sheet_name) {
       )
     ) |>
     ungroup() |>
-    filter(match_status != "ok") |>
+    filter(match_status != "ok")  |>
     select(match_status, name, sensor_type, site_name, file_logger_id, deployment_date)
   
   # Report results
@@ -227,10 +241,12 @@ prerun_check <- function(root_folder_id, metadata_file_url, sheet_name) {
       "\n  - multiple matches:  ", sum(unmatched$match_status == "multiple matches")
     ))
     message("Fix these in the metadata sheet before running the pipeline.")
-    print(unmatched)
   }
   
-  return(invisible(unmatched))
+  return(list(
+    missing_dates = missing_dates,
+    unmatched = unmatched
+  ))
   
 } # END prerun check function ----
 
@@ -910,10 +926,6 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
     combined_data <- bind_rows(old_data, new_data)
     
     
-    # CHECK -- DELETE LATER
-    combined_data <- bind_rows(old_data, new_data)
-    message(paste("Columns after bind_rows:", paste(names(combined_data), collapse = ", ")))  # temp diagnostic
-    
     # Round timestamps to nearest 15 minutes and handle duplicates
     combined_data <- combined_data |>
       mutate(datetime = round_date(datetime, "15 minutes")) |>
@@ -949,8 +961,8 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
                 join_by(site, position, logger_type,
                         datetime > in_water_date,
                         datetime < out_of_water_date)) |>
-      mutate(issue_flag = coalesce(issue_flag, flag_fill),
-             comments = coalesce(comments, comments_fill)) |>
+      mutate(issue_flag = coalesce(flag_fill, issue_flag),
+             comments = coalesce(comments_fill, comments)) |>
       select(-flag_fill, -comments_fill, -in_water_date, -out_of_water_date) |>
       arrange(site, position, datetime) |>
       distinct()
