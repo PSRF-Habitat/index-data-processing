@@ -1,0 +1,37 @@
+---
+title: "New Instrument Metadata Format"
+format: html
+---
+
+This script was used to create a new metadata sheet for Eyes on Kelp Index continuous environmental sensor data. 
+
+Main changes include converting file from wide format to long, so each datafile points to a new row.
+
+
+## Setup
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(janitor)
+library(googledrive)
+library(googlesheets4)
+library(lubridate)
+
+
+# Link to the metadata sheet
+metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098"
+
+# Name of the tab with the file metadata
+sheet_name = " Deployments_IndexOnly"
+```
+
+
+## Reformatting
+
+```{r}
+
+```
+
+
+
