@@ -1,0 +1,89 @@
+---
+title: "prep_for_dnr"
+format: html
+---
+
+Script to prepare data for sharing with DNR for sensor comparisons.
+
+Think of including:
+
+- temp
+- salinity
+- light
+- pressure
+
+all from the surface and benthos when available.
+
+
+Share data for:
+
+- Wing Pt, 6-14-24 to 2-26-25
+- Edmonds, 6-18-2024 to 2-18-25
+- Squaxin, 9-25-24 to 8-21-25
+- Squaxin, 11-15-25 to 3-9-26+
+
+
+Prep work:
+
+- Confirm that issue flags are matching correctly to time frames
+- Remove "bad" data flags
+- Have all PAR been calibrated for these deployments?
+- Do we share conductivity, despite knowing that values are off?
+- What associated metadata do I need to write?
+
+## Temp
+
+#### Wing Point
+
+```{r}
+
+```
+
+
+#### Edmonds
+
+
+#### Squaxin
+
+---
+
+## Salinity
+
+#### Wing Point
+
+
+#### Edmonds
+
+
+#### Squaxin
+
+---
+
+## Light
+
+#### Wing Point
+
+
+#### Edmonds
+
+
+#### Squaxin
+
+---
+
+## Pressure
+
+#### Wing Point
+
+
+#### Edmonds
+
+
+#### Squaxin
+
+
+
+
+
+
+
