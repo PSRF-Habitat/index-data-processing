@@ -31,6 +31,22 @@ Prep work:
 - Do we share conductivity, despite knowing that values are off?
 - What associated metadata do I need to write?
 
+## Setup
+
+```{r}
+# load libraries ----
+library(tidyverse)
+library(here)
+
+# load data ----
+# note: using data updated on 4/1/2026
+temp <- readRDS(here("data", "logger_data_temp.rds"))
+salinity <- readRDS(here("data", "logger_data_con.rds"))
+light <- readRDS(here("data", "logger_data_par.rds"))
+pressure <- readRDS(here("data", "logger_data_wl.rds"))
+```
+
+
 ## Temp
 
 #### Wing Point
