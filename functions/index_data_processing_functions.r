@@ -53,14 +53,121 @@ get_all_logger_csvs_by_id <- function(root_folder_id) {
 
 
 
+#' # Read and clean index logger metadata ----
+#' #'
+#' #' @param metadata_file_url URL to main index metadata google sheet
+#' #' @param sheet_name Name of the tab that the metadata is on
+#' #'
+#' #' @returns A clean metadata sheet to be combined with logger data
+#' #'
+#' read_and_clean_metadata <- function(metadata_file_url, sheet_name){
+#'   
+#'   # Read in metadata sheet from google drive
+#'   metadata_raw <- read_sheet(metadata_file_url,
+#'                              sheet = sheet_name,
+#'                              na = c("", "n/a", "#N/A"),
+#'                              col_types = "c")
+#'   
+#'   # Cleaning
+#'   metadata <- metadata_raw |>
+#'     clean_names() |>
+#'     # Rename nickname to logger_id to match logger file convention
+#'     rename("logger_id" = "nickname") |>
+#'     # Make position consistently lowercase
+#'     mutate(position = tolower(position)) |>
+#'     # Remove rows that are year separators
+#'     filter(!(str_detect(site, "^20\\d{2}$"))) |>
+#'     # Make site name capital with space. e.g., North Beach
+#'     mutate(site = str_replace_all(site, "(?<=[a-z])(?=[A-Z])", " ")) |>
+#'     # Parse dates from varying formats
+#'     mutate(initial_deployment_date = 
+#'              parse_date_time(initial_deployment_date,
+#'                              orders = c("ymd", "mdy")),
+#'            relaunch_date =
+#'              parse_date_time(relaunch_date,
+#'                              orders = c("ymd", "mdy")),
+#'            recovery_date = 
+#'              parse_date_time(recovery_date,
+#'                              orders = c("ymd", "mdy"))) |>
+#'     # Select columns to keep
+#'     select(c(site, position, logger_id, sn, initial_deployment_date,
+#'              relaunch_date, recovery_date, issue_flag_deployment,
+#'              issue_flag_relaunch, comments_for_initial_deployment,
+#'              comments_for_relaunch_deployment, comments_recovery)) |>
+#'     rename("serial_number" = "sn")
+#'   
+#'   # Make initial deployment file
+#'   initial <- metadata |>
+#'     mutate(deployment_type = "initial",
+#'            in_water_date = initial_deployment_date,
+#'            # out of water date is either relaunch date, 
+#'            # or if there was no relaunch, it is recovery date.
+#'            # coalesce() finds the first non-missing value at each position
+#'            out_of_water_date = coalesce(relaunch_date, recovery_date),
+#'            issue_flag = issue_flag_deployment,
+#'            comments = comments_for_initial_deployment) |>
+#'     select(site, position, logger_id, serial_number,
+#'            deployment_type, in_water_date, out_of_water_date,
+#'            issue_flag, comments) |>
+#'     # make sure dates are dates
+#'     mutate(out_of_water_date = as.Date(out_of_water_date),
+#'            in_water_date = as.Date(in_water_date))
+#'   
+#'   # Make relaunch deployment file
+#'   relaunch <- metadata |>
+#'     # Remove rows when sensor was not relaunched
+#'     filter(!is.na(relaunch_date)) |>
+#'     mutate(deployment_type = "relaunch",
+#'            in_water_date = relaunch_date,
+#'            out_of_water_date = recovery_date,
+#'            issue_flag = issue_flag_relaunch,
+#'            comments = case_when(
+#'              !is.na(comments_for_relaunch_deployment) & 
+#'                !is.na(comments_recovery) ~
+#'                paste(comments_for_relaunch_deployment,
+#'                      comments_recovery, sep = ", "),
+#'              !is.na(comments_for_relaunch_deployment) ~
+#'                comments_for_relaunch_deployment,
+#'              !is.na(comments_recovery) ~
+#'                comments_recovery,
+#'              TRUE ~ NA_character_
+#'            )) |>
+#'     select(site, position, logger_id, serial_number,
+#'            deployment_type, in_water_date, out_of_water_date,
+#'            issue_flag, comments) |>
+#'     # make sure dates are dates
+#'     mutate(out_of_water_date = as.Date(out_of_water_date),
+#'            in_water_date = as.Date(in_water_date))
+#'   
+#'   # Combine initial and relaunch files
+#'   metadata_long <- bind_rows(initial, relaunch) |>
+#'     arrange(site, position, in_water_date, logger_id)
+#'   
+#'   # Add logger type column
+#'   metadata_long <- metadata_long |>
+#'     mutate(logger_type = case_when(
+#'       grepl("^T\\d", logger_id) ~ "temperature",
+#'       grepl("^WLBT|^WL|^TP", logger_id) ~ "water level",
+#'       logger_id == "AIR" ~ "water level",
+#'       grepl("^CON", logger_id) ~ "conductivity",
+#'       grepl("^DO", logger_id) ~ "dissolved oxygen",
+#'       grepl("^pH", logger_id) ~ "ph",
+#'       grepl("^PAR|^PSRF|^DNR", logger_id) ~ "par",
+#'       .default = NA
+#'     ))
+#'   
+#'   return(metadata_long)
+#' }  # END metadata cleaning function ----
+
+
 # Read and clean index logger metadata ----
-#'
+#' NEW!
 #' @param metadata_file_url URL to main index metadata google sheet
 #' @param sheet_name Name of the tab that the metadata is on
 #'
 #' @returns A clean metadata sheet to be combined with logger data
 #'
-read_and_clean_metadata <- function(metadata_file_url, sheet_name){
+read_and_clean_metadata <- function(metadata_file_url, sheet_name) {
   
   # Read in metadata sheet from google drive
   metadata_raw <- read_sheet(metadata_file_url,
@@ -68,96 +175,30 @@ read_and_clean_metadata <- function(metadata_file_url, sheet_name){
                              na = c("", "n/a", "#N/A"),
                              col_types = "c")
   
-  # Cleaning
   metadata <- metadata_raw |>
     clean_names() |>
+    
     # Rename nickname to logger_id to match logger file convention
-    rename("logger_id" = "nickname") |>
-    # Make position consistently lowercase
-    mutate(position = tolower(position)) |>
-    # Remove rows that are year separators
-    filter(!(str_detect(site, "^20\\d{2}$"))) |>
-    # Make site name capital with space. e.g., North Beach
-    mutate(site = str_replace_all(site, "(?<=[a-z])(?=[A-Z])", " ")) |>
-    # Parse dates from varying formats
-    mutate(initial_deployment_date = 
-             parse_date_time(initial_deployment_date,
-                             orders = c("ymd", "mdy")),
-           relaunch_date =
-             parse_date_time(relaunch_date,
-                             orders = c("ymd", "mdy")),
-           recovery_date = 
-             parse_date_time(recovery_date,
-                             orders = c("ymd", "mdy"))) |>
-    # Select columns to keep
-    select(c(site, position, logger_id, sn, initial_deployment_date,
-             relaunch_date, recovery_date, issue_flag_deployment,
-             issue_flag_relaunch, comments_for_initial_deployment,
-             comments_for_relaunch_deployment, comments_recovery)) |>
-    rename("serial_number" = "sn")
-  
-  # Make initial deployment file
-  initial <- metadata |>
-    mutate(deployment_type = "initial",
-           in_water_date = initial_deployment_date,
-           # out of water date is either relaunch date, 
-           # or if there was no relaunch, it is recovery date.
-           # coalesce() finds the first non-missing value at each position
-           out_of_water_date = coalesce(relaunch_date, recovery_date),
-           issue_flag = issue_flag_deployment,
-           comments = comments_for_initial_deployment) |>
-    select(site, position, logger_id, serial_number,
-           deployment_type, in_water_date, out_of_water_date,
-           issue_flag, comments) |>
-    # make sure dates are dates
-    mutate(out_of_water_date = as.Date(out_of_water_date),
-           in_water_date = as.Date(in_water_date))
-  
-  # Make relaunch deployment file
-  relaunch <- metadata |>
-    # Remove rows when sensor was not relaunched
-    filter(!is.na(relaunch_date)) |>
-    mutate(deployment_type = "relaunch",
-           in_water_date = relaunch_date,
-           out_of_water_date = recovery_date,
-           issue_flag = issue_flag_relaunch,
-           comments = case_when(
-             !is.na(comments_for_relaunch_deployment) & 
-               !is.na(comments_recovery) ~
-               paste(comments_for_relaunch_deployment,
-                     comments_recovery, sep = ", "),
-             !is.na(comments_for_relaunch_deployment) ~
-               comments_for_relaunch_deployment,
-             !is.na(comments_recovery) ~
-               comments_recovery,
-             TRUE ~ NA_character_
-           )) |>
-    select(site, position, logger_id, serial_number,
-           deployment_type, in_water_date, out_of_water_date,
-           issue_flag, comments) |>
-    # make sure dates are dates
-    mutate(out_of_water_date = as.Date(out_of_water_date),
-           in_water_date = as.Date(in_water_date))
-  
-  # Combine initial and relaunch files
-  metadata_long <- bind_rows(initial, relaunch) |>
+    rename(logger_id = nickname) |>
+    
+    # Make position and logger_type consistently lowercase
+    mutate(position = tolower(position),
+           logger_type = tolower(logger_type)) |>
+
+    # Parse date columns
+    mutate(across(c(launch_date_office, in_water_date,
+                    out_of_water_date, data_readout_date),
+                  ~ suppressWarnings(as.Date(parse_date_time(.x, orders = c("ymd", "mdy")))))) |>
+    
+    select(site, position, logger_id, serial_number, deployment_type,
+           launch_date_office, in_water_date, in_water_time,
+           out_of_water_date, out_of_water_time, data_readout_date,
+           issue_flag, comments, logger_type,
+           file_name) |>
     arrange(site, position, in_water_date, logger_id)
   
-  # Add logger type column
-  metadata_long <- metadata_long |>
-    mutate(logger_type = case_when(
-      grepl("^T\\d", logger_id) ~ "temperature",
-      grepl("^WLBT|^WL|^TP", logger_id) ~ "water level",
-      logger_id == "AIR" ~ "water level",
-      grepl("^CON", logger_id) ~ "conductivity",
-      grepl("^DO", logger_id) ~ "dissolved oxygen",
-      grepl("^pH", logger_id) ~ "ph",
-      grepl("^PAR|^PSRF|^DNR", logger_id) ~ "par",
-      .default = NA
-    ))
-  
-  return(metadata_long)
-}  # END metadata cleaning function ----
+  return(metadata)
+} # END metadata cleaning function ----
 
 
 #' Pre-Run Check: Identify logger files with NO match in metadata ----
@@ -1020,3 +1061,93 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
   
   return(final_data)
 } # END update_logger_data_incremental ----
+
+
+#' Helper function to build a plot for a site x position combo with data issue flags
+#'
+#' @param data (dataframe) The data frame to visualize
+#' @param site_name (character string) The site name as it appears in the data 
+#' @param pos (character string) surface or bottom
+#' @param sensor_col (character string) the exact name of the column with data
+#' @param y_label (character string) 
+#' @param title_sensor (character string) 
+#'
+#' @returns A ggplot
+#' 
+issue_plot_builder <- function(data, site_name, pos, sensor_col, y_label, title_sensor) {
+  
+  # Filter to this site/position
+  plot_data <- data |>
+    filter(site == site_name,
+           position == pos)
+  
+  # Skip if no data for this combo
+  if (nrow(plot_data) == 0) {
+    message(paste("No data found for:", site_name, pos, "- skipping"))
+    return(NULL)
+  }
+  
+  # Build flagged periods
+  issue_periods <- plot_data |>
+    filter(!is.na(issue_flag)) |>
+    arrange(datetime) |>
+    mutate(
+      time_gap = as.numeric(difftime(datetime, lag(datetime), units = "hours")),
+      new_group = is.na(time_gap) | issue_flag != lag(issue_flag, default = "") | time_gap > 1,
+      group_id = cumsum(new_group)
+    ) |>
+    group_by(site, position, issue_flag, group_id) |>
+    summarise(start = min(datetime),
+              end = max(datetime),
+              .groups = "drop")
+  
+  # Plot
+  ggplot(plot_data |> 
+           mutate(year = year(datetime)),
+         aes(x = datetime, y = .data[[sensor_col]])) +
+    geom_rect(data = issue_periods |> 
+                mutate(year = year(start)),
+              aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = issue_flag),
+              inherit.aes = FALSE, alpha = 0.2) +
+    geom_point(alpha = 0.3, size = 0.8) +
+    labs(title = paste0(site_name, ", ", str_to_title(pos), ", ", title_sensor, " (Raw)"),
+         subtitle = "Data issues for deployments highlighted behind points",
+         y = y_label,
+         fill = "Issue Flag") +
+    facet_wrap(~ year, 
+               scales = "free_x", 
+               ncol = 1) +
+    theme_minimal(base_size = 12) +
+    theme(plot.title.position = "plot")
+} # END issue_plot_builder function ----
+  
+  
+#' MAIN VIZ FUNCTION: Visualize data and issues with deployments
+#' 
+#' Use this function to visualize the data with issue flags for review. 
+#' 
+#' @param data The data frame that you would like to visualize.
+#'
+#' @returns A list of plots to scroll through, to manually check data issues noted in the metadata. 
+#'
+plot_issue_flags <- function(data, sensor_col, y_label, sensor_type) {
+  
+  # Get unique site/position combos
+  site_pos_combos <- data |> 
+    distinct(site, position)
+  
+  
+  # Generate a plot for each site/position combo in data
+  plots <- pmap(site_pos_combos, function(site, position) {
+    issue_plot_builder(data, site, position,
+                       sensor_col = sensor_col,
+                       y_label = y_label,
+                       title_sensor = sensor_type)
+  })
+  
+  # Name the list for easy reference
+  names(plots) <- paste(site_pos_combos$site, site_pos_combos$position, sep = " - ")
+
+  return(plots)
+  
+} # END plot_issue_flags ----
