@@ -220,29 +220,44 @@ read_and_clean_metadata <- function(metadata_file_url, sheet_name) {
 #'
 prerun_check <- function(root_folder_id, metadata_file_url, sheet_name) {
   
-  message("Running pre-check")
+  cli::cli_h1("Pre-Run Check")
   
   # Get all files from Drive
-  message("Scanning Google Drive for files...")
+  cli::cli_h2("Scanning Google Drive")
   all_files <- get_all_logger_csvs_by_id(root_folder_id)
-  message(paste("Found", nrow(all_files), "total files in Drive"))
+  cli::cli_alert_success("Found {nrow(all_files)} total file{?s} in Drive")
   
   # Load metadata
-  message("Loading metadata...")
+  cli::cli_h2("Loading metadata")
   metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
   
-  # Check for missing deployment dates in metadata
-  missing_dates <- metadata |>
-    filter(is.na(in_water_date) | is.na(out_of_water_date)) # |>
-   # select(site, position, logger_id, logger_type, in_water_date, out_of_water_date)
+  # Check for invalid deployment dates
+  cli::cli_h2("Checking for invalid metadata dates")
+  invalid_dates <- metadata |>
+    filter(is.na(in_water_date) | is.na(out_of_water_date))
   
-  if (nrow(missing_dates) > 0) {
-    message(paste(nrow(missing_dates), "metadata row(s) have missing in_water_date or out_of_water_date."))
+  if (nrow(invalid_dates) > 0) {
+    cli::cli_alert_danger("{nrow(invalid_dates)} metadata row{?s} have invalid (missing or unparseable) in_water_date or out_of_water_date. Rows with invalid dates will not be matched to potential associated data files.")
   } else {
-    message("All metadata rows have valid deployment dates.")
+    cli::cli_alert_success("All metadata rows have valid deployment dates.")
   }
   
+  # Check for duplicate site/position/in_water_date/logger_type rows
+  cli::cli_h2("Checking for duplicate metadata rows")
+  duplicate_rows <- metadata |>
+    filter(!is.na(in_water_date)) |>
+    count(site, position, in_water_date, logger_type) |>
+    filter(n > 1)
+  
+  if (nrow(duplicate_rows) == 0) {
+    cli::cli_alert_success("No duplicate metadata rows. Good to go!")
+  } else {
+    cli::cli_alert_danger("{nrow(duplicate_rows)} duplicate row{?s} in metadata. Duplicate rows will cause pipeline to fail. Handle duplicates before proceeding.")
+  }
+  
+  
   # Parse file name components for all files (same logic as read_and_clean_logger_csv)
+  cli::cli_h2("Checking that all .csv files have a match in the metadata")
   file_info <- all_files |>
     mutate(
       parts = str_split(name, "_", simplify = TRUE),
@@ -274,18 +289,22 @@ prerun_check <- function(root_folder_id, metadata_file_url, sheet_name) {
   
   # Report results
   if (nrow(unmatched) == 0) {
-    message("All files have exactly one metadata match. Good to go!")
+    cli::cli_alert_success("All files have exactly one metadata match. Good to go!")
   } else {
-    message(paste(nrow(unmatched), "file(s) will not be processed:"))
-    message(paste0(
-      "\n  - no match:          ", sum(unmatched$match_status == "no match"),
-      "\n  - multiple matches:  ", sum(unmatched$match_status == "multiple matches")
+    cli::cli_alert_danger("{nrow(unmatched)} file{?s} will not be processed:")
+    cli::cli_bullets(c(
+      "*" = "no match:          {sum(unmatched$match_status == 'no match')}",
+      "*" = "multiple matches:  {sum(unmatched$match_status == 'multiple matches')}"
     ))
-    message("Fix these in the metadata sheet before running the pipeline.")
+    
+    cli::cli_alert_info("Fix these in the metadata sheet before running the pipeline.")
   }
   
+  cli::cli_h1("Pre-run check complete")
+  
   return(list(
-    missing_dates = missing_dates,
+    invalid_dates = invalid_dates,
+    duplicate_rows = duplicate_rows,
     unmatched = unmatched
   ))
   
