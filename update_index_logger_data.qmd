@@ -117,13 +117,16 @@ Replace the values in the quotation marks `" "` if necessary.
 ######### PSRF Sites ##########
 # Folder to search in for logger files. Currently named "csvfiles" in Drive
 # Folder ID found after the final / in the folder's URL
-root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv"
+# root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv"
+
+# FOR MARINA TESTING
+root_folder_id = "1TarMgY-SC4L-iTCyeuo-6UVwP9Gaj6U0"
 
 # Link to the metadata sheet
 metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098"
 
 # Name of the tab with the file metadata
-sheet_name = " Deployments_IndexOnly"
+sheet_name = "Reorganized_Deployments_IndexOnly"
 
 
 # ######### Reef Check Sites ##########
@@ -173,14 +176,20 @@ checks <- prerun_check(root_folder_id = root_folder_id,
                 metadata_file_url = metadata_file_url,
                 sheet_name = sheet_name)
 
-# See metadata rows with missing dates
-View(checks$missing_dates)
-
+##### MAIN CHECK #####
 # See files that will not be processed
 View(checks$unmatched)
+
+##### Optional Checks #####
+# --- may assist in finding common metadata mistakes --- #
+# See metadata rows with invalid dates
+# View(checks$invalid_dates)
+
+# See duplicate metadata rows
+# View(checks$duplicate_rows)
 ```
 
-If any files are flagged, fix their entries in the metadata sheet before
+If any files are flagged, fix their entries in the metadata sheet in Google Sheets before
 proceeding to Step 4. Common issues to check:
 
 - Site name spelling matches between the file name and metadata
@@ -188,6 +197,8 @@ proceeding to Step 4. Common issues to check:
   exactly
 - Deployment date in the file name matches either `Initial Deployment Date` 
   or `Relaunch Date` in metadata
+  
+Please also check that all metadata entries that have an associated data file have both an in water and out of water date.
 
 After fixing issues in file names and metadata in Google Drive, re-run the check. Once the pre-run check returns no issues, proceed to Step 4!
 
@@ -215,7 +226,8 @@ pushing `command + return` on mac or `ctrl + enter` on pc.
 data <- update_logger_data_incremental(root_folder_id = root_folder_id,
                                        metadata_file_url = metadata_file_url,
                                        sheet_name = sheet_name,
-                                       force_reprocess = TRUE)
+                                       force_reprocess = TRUE,
+                                       verbose = FALSE)
 ```
 
 ## Step 5: Export as CSV to Google Drive
@@ -267,6 +279,120 @@ unlink(temp_csv)
 unlink(temp_rds)
 ```
 
+# Data Review
+
+Use this section to review data and issue flags for either the entire dataset or the most recently added deployments. Use these plots to help inform what data should be filtered out (e.g., points crash to 0 or issue flag notes that a surface instrument was recovered from the bottom). 
+
+## SST
+
+Surface temperature from the tidbit loggers
+
+```{r}
+# Build plots
+sst_plots <- plot_issue_flags(data$temp, "tidbit_temp_c", "Temperature (°C)", "Temperature")
+
+# Scroll through all plots in plot viewer
+walk(sst_plots[!sapply(sst_plots, is.null)], print)
+
+# Or refer to by name
+sst_plots[["Jefferson Head - surface"]]
+```
+
+## Temp - bottom
+
+need to figure out a way to only show bottom for this one!!!!
+
+```{r}
+# NEED TO WORK ON THIS ONE ----
+# see notes ----
+
+# Build plots
+temp_bottom_plots <- plot_issue_flags(data$ph, "ph_temp_c", "Temperature (°C)", "Temperature")
+
+# Scroll through all plots in plot viewer
+walk(temp_bottom_plots[!sapply(temp_bottom_plots, is.null)], print)
+
+# Or refer to by name
+temp_bottom_plots[["Jefferson Head - bottom"]]
+```
+
+Is there a common name for bottom temp like there is for sst? Huh. 
+
+NEED TO DECIDE which logger we want to use for bottom temp. Make time to poke around and see what is the most reliable. Perhaps Sophie has an idea about this already?
+
+## pH
+
+```{r}
+# Build plots
+ph_plots <- plot_issue_flags(data$ph, "pH", "pH", "pH")
+
+# Scroll through all plots in plot viewer
+walk(ph_plots[!sapply(ph_plots, is.null)], print)
+
+# Or refer to by name
+ph_plots[["Jefferson Head - bottom"]]
+```
+
+## Dissolved Oxygen
+
+```{r}
+# Build plots
+do_plots <- plot_issue_flags(data$do, "do_conc_mg_per_L", "DO", "Dissolved Oxygen")
+
+# Scroll through all plots in plot viewer
+walk(do_plots[!sapply(do_plots, is.null)], print)
+
+# Or refer to by name
+do_plots[["Jefferson Head - bottom"]]
+```
+
+
+## Conductivity
+
+```{r}
+# Build plots
+con_plots <- plot_issue_flags(data$con, "high_range_microsiemens_per_cm", 
+                              "CON", "Conductivity")
+
+# Scroll through all plots in plot viewer
+walk(con_plots[!sapply(con_plots, is.null)], print)
+
+# Or refer to by name
+con_plots[["Jefferson Head - bottom"]]
+```
+
+## Water Level
+
+```{r}
+# Build plots
+wl_plots <- plot_issue_flags(data$wl, "abs_pres_kpa", 
+                              "Absolute Pressure", "Water Level")
+
+# Scroll through all plots in plot viewer
+walk(wl_plots[!sapply(wl_plots, is.null)], print)
+
+# Or refer to by name
+wl_plots[["Jefferson Head - bottom"]]
+```
+
+## PAR
+
+```{r}
+# Build plots
+par_plots <- plot_issue_flags(data$par, "calibrated_integrating_light", 
+                              "Light", "PAR")
+
+# Scroll through all plots in plot viewer
+walk(par_plots[!sapply(par_plots, is.null)], print)
+
+# Or refer to by name
+par_plots[["Jefferson Head - bottom"]]
+```
+
+
+
+
+
 # Visual Check
 
 The final, optional step is to visually check the data.
@@ -313,10 +439,10 @@ Bottom:
 ```{r}
 #| code-fold: true
 # pH bottom
-data |>
+data$ph |>
   filter(position == "bottom") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = pH, color = ph_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = pH), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "pH at Bottom by Site",
        x = "Date",
@@ -333,10 +459,10 @@ Surface:
 #| code-fold: true
 # DO surface
 # Raw
-data |>
+data$do |>
   filter(position == "surface") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Dissolved Oxygen at Surface by Site",
        x = "Date",
@@ -345,11 +471,11 @@ data |>
 
 
 # No values below zero
-data |>
+data$do |>
   filter(position == "surface") |>
   filter(do_conc_mg_per_L >= 0) |>
   ggplot() +
-  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Dissolved Oxygen at Surface by Site (Filtered to >= 0)",
        x = "Date",
@@ -363,10 +489,10 @@ Bottom:
 #| code-fold: true
 # DO bottom
 # Raw
-data |>
+data$do |>
   filter(position == "bottom") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Dissolved Oxygen at Bottom by Site",
        x = "Date",
@@ -374,11 +500,11 @@ data |>
   theme_minimal()
 
 # No values below zero
-data |>
+data$do |>
   filter(position == "bottom") |>
   filter(do_conc_mg_per_L >= 0) |>
   ggplot() +
-  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = do_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = do_conc_mg_per_L, color = logger_id), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Dissolved Oxygen at Bottom by Site (Filtered to >= 0)",
        x = "Date",
@@ -394,10 +520,10 @@ Surface:
 ```{r}
 #| code-fold: true
 # CON surface
-data |>
+data$con |>
   filter(position == "surface") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Conductivity at Surface by Site",
        x = "Date",
@@ -411,10 +537,10 @@ Bottom:
 ```{r}
 #| code-fold: true
 # CON bottom
-data |>
+data$con |>
   filter(position == "bottom") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = con_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Conductivity at Bottom by Site",
        x = "Date",
@@ -430,10 +556,10 @@ Bottom:
 ```{r}
 #| code-fold: true
 # WL bottom
-data |>
+data$wl |>
   filter(position == "bottom") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = abs_pres_kpa, color = wl_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = abs_pres_kpa), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "Water Level at Bottom by Site",
        x = "Date",
@@ -449,10 +575,10 @@ Bottom:
 ```{r}
 #| code-fold: true
 # PAR bottom (raw)
-data |>
+data$par |>
   filter(position == "bottom") |>
   ggplot() +
-  geom_point(aes(x = datetime, y = raw_integrating_light, color = par_logger_id), size = 0.1) +
+  geom_point(aes(x = datetime, y = raw_integrating_light), size = 0.1) +
   facet_wrap(~site) +
   labs(title = "PAR Raw at Bottom by Site",
        x = "Date",
@@ -461,105 +587,4 @@ data |>
 
 ```
 
-#### Temp All Instruments
-
-Surface:
-
-```{r}
-#| code-fold: true
-# Raw
-
-
-possible_temp_cols <- c("tidbit_temp_c", "ph_temp_c", "do_temp_c", "wl_temp_c", "con_temp_c")
-
-data |>
-  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
-  pivot_longer(
-    cols = c(any_of(possible_temp_cols)),
-    names_to = "temp_sensor_type",
-    values_to = "temperature_c"
-  ) |>
-  filter(position == "surface") |>
-  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
-  geom_line(alpha = 0.7) +
-  facet_wrap(~site) +
-  labs(
-    title = "Temperature Measurements at Surface by Site and Sensor Type",
-    x = "Date/Time", 
-    y = "Temperature (°C)",
-    color = "Sensor Type"
-  ) +
-  theme_minimal()
-
-# Filtered
-data |>
-  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
-  pivot_longer(
-    cols = c(any_of(possible_temp_cols)),
-    names_to = "temp_sensor_type",
-    values_to = "temperature_c"
-  ) |>
-  filter(position == "surface",
-         temperature_c >= 0,
-         temperature_c <= 25) |>
-  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
-  geom_line(alpha = 0.7) +
-  facet_wrap(~site) +
-  labs(
-    title = "Temperature Measurements at Surface by Site and Sensor Type",
-    subtitle = "Filtered between 0 and 25 °C",
-    x = "Date/Time", 
-    y = "Temperature (°C)",
-    color = "Sensor Type"
-  ) +
-  theme_minimal()
-```
-
-Bottom:
-
-```{r}
-#| code-fold: true
-# Raw
-data |>
-  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
-  pivot_longer(
-    cols = c(any_of(possible_temp_cols)),
-    names_to = "temp_sensor_type",
-    values_to = "temperature_c"
-  ) |>
-  filter(position == "bottom") |>
-  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
-  geom_line(alpha = 0.5) +
-  facet_wrap(~site) +
-  labs(
-    title = "Temperature Measurements at Bottom by Site and Sensor Type",
-    x = "Date/Time", 
-    y = "Temperature (°C)",
-    color = "Sensor Type"
-  ) +
-  theme_minimal()
-
-# Filtered
-data |>
-  select("site", "position", "datetime", any_of(possible_temp_cols)) |>
-  pivot_longer(
-    cols = c(any_of(possible_temp_cols)),
-    names_to = "temp_sensor_type",
-    values_to = "temperature_c"
-  ) |>
-  filter(position == "bottom",
-         temperature_c >= 0,
-         temperature_c <= 25) |>
-  ggplot(aes(x = datetime, y = temperature_c, color = temp_sensor_type)) +
-  geom_line(alpha = 0.5) +
-  facet_wrap(~site) +
-  labs(
-    title = "Temperature Measurements at Bottom by Site and Sensor Type",
-    subtitle = "Filtered between 0 and 25 °C",
-    x = "Date/Time", 
-    y = "Temperature (°C)",
-    color = "Sensor Type"
-  ) +
-  theme_minimal()
-```
 
