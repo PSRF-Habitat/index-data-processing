@@ -1,0 +1,1009 @@
+---
+title: "prep_for_dnr"
+format: html
+---
+
+Script to prepare data for sharing with DNR for sensor comparisons.
+
+**Think of including:**
+
+-   temp
+-   salinity
+-   light
+-   pressure
+
+all from the surface and benthos when available.
+
+**Share data for:**
+
+-   Wing Pt, 6-14-24 to 2-26-25
+
+    -   Temp: surface and bottom ready to go!
+
+-   Edmonds, 6-18-2024 to 2-18-25
+
+     -   Temp: surface and bottom ready to go!
+
+-   Squaxin, 9-25-24 to 8-21-25
+
+-   Squaxin, 11-15-25 to 3-9-26+
+
+*BUT* There is likely more overlap for metrics other than SST. First let's see what we can offer for their deployment periods
+
+**Prep work:**
+
+-   Confirm that issue flags are matching correctly to time frames
+    -   Most recent full data update (4/1/2026) issue flag matching **not** working.
+    -   Need to:
+        1.  update pipeline to accommodate new (improved) metadata format and
+        2.  run pipeline (passive, but time consuming)
+    -   Note: sites managed by partners still using old (wide) metadata format
+    -   **Decide:** Manually check issues for requested data and update pipeline later? Or use as excuse to work on pipeline now, and further delay data sharing? --> MANUALLY CHECKING ISSUES
+-   Remove "bad" data flags
+-   Have all PAR been calibrated for these deployments?
+-   Do we share conductivity, despite knowing that values are off?
+-   What associated metadata do I need to write?
+
+## Setup
+
+```{r}
+# load libraries ----
+library(tidyverse)
+library(here)
+
+# load data ----
+# note: using data updated on 4/1/2026
+temp <- readRDS(here("data", "logger_data_temp.rds"))
+salinity <- readRDS(here("data", "logger_data_con.rds"))
+light <- readRDS(here("data", "logger_data_par.rds"))
+pressure <- readRDS(here("data", "logger_data_wl.rds"))
+ph <- readRDS(here("data", "logger_data_ph.rds")) # best bottom temp data comes from pH sensor
+metadata <- read_csv(here("data", "metadata.csv")) # metadata from 7/27/2026
+```
+
+## Temp
+
+#### Wing Point
+
+6-14-24 to 2-26-25
+
+**Surface**
+
+```{r}
+# Filter to site & date range ----
+wing_pt_temp_surface <- temp |>
+  filter(site == "Wing Point",
+         between(datetime, ymd_hms("2024-06-14 00:00:00"), ymd_hms("2025-02-26 23:59:59"))) |>
+  rename("temp_c" = "tidbit_temp_c")
+
+# check filter
+ggplot(wing_pt_temp_surface) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+
+**Bottom**
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 3-19-24 to 2-26-25
+bott_temp_wp <- ph |>
+  filter(site == "Wing Point",
+         datetime >= ymd_hms("2024-03-19 00:00:00") &
+           datetime <= ymd_hms("2025-02-26 00:00:00"),
+         position == "bottom") |>
+  rename("temp_c" = "ph_temp_c")
+
+# visual check
+ggplot(bott_temp_wp) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+
+```{r}
+# combine surface and bottom at wing pt
+wing_pt_temp <- bind_rows(wing_pt_temp_surface, bott_temp_wp)
+
+# check combine
+ggplot(wing_pt_temp) +
+  geom_point(aes(x = datetime, y = temp_c)) +
+  facet_wrap(~position, ncol = 1)
+```
+
+Check issue flags
+
+```{r}
+# function to create issue flag plots ----
+issue_plot_builder <- function(data, site_name, pos, sensor_col, y_label, title_sensor) {
+  
+  # Filter to this site/position
+  plot_data <- data |>
+    filter(site == site_name,
+           position == pos)
+
+  
+  # Build flagged periods
+  issue_periods <- plot_data |>
+    filter(!is.na(issue_flag)) |>
+    arrange(datetime) |>
+    mutate(
+      time_gap = as.numeric(difftime(datetime, lag(datetime), units = "hours")),
+      new_group = is.na(time_gap) | issue_flag != lag(issue_flag, default = "") | time_gap > 1,
+      group_id = cumsum(new_group)
+    ) |>
+    group_by(site, position, issue_flag, group_id) |>
+    summarise(start = min(datetime),
+              end = max(datetime),
+              .groups = "drop")
+  
+  # Plot
+  ggplot(plot_data |> 
+           mutate(year = year(datetime)),
+         aes(x = datetime, y = .data[[sensor_col]])) +
+    geom_rect(data = issue_periods |> 
+                mutate(year = year(start)),
+              aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = issue_flag),
+              inherit.aes = FALSE, alpha = 0.2) +
+    geom_point(alpha = 0.3, size = 0.8) +
+    labs(title = paste0(site_name, ", ", str_to_title(pos), ", ", title_sensor, " (Raw)"),
+         subtitle = "Data issues for deployments highlighted behind points",
+         y = y_label,
+         fill = "Issue Flag") +
+    facet_wrap(~ year, 
+               scales = "free_x", 
+               ncol = 1) +
+    theme_minimal(base_size = 12) +
+    theme(plot.title.position = "plot")
+}
+```
+
+```{r}
+# check for issues
+issue_plot_builder(wing_pt_temp, "Wing Point", "surface", "temp_c", "C", "temp")
+```
+
+```{r}
+# check for issues
+issue_plot_builder(wing_pt_temp, "Wing Point", "bottom", "temp_c", "C", "temp")
+```
+
+**Wing Point temp data good to go**
+
+Manually check issues against metadata
+
+```{r}
+wp_meta_temp_surface <- metadata |>
+  filter(site == "Wing Point",
+         logger_type == "temperature",
+         in_water_date >= as.Date("2024-06-13"),
+         in_water_date <= as.Date("2025-02-19"))
+
+# no issue flags for surface
+```
+```{r}
+wp_meta_temp_bottom <- metadata |>
+  filter(site == "Wing Point",
+         logger_type == "ph",
+         position == "bottom",
+         in_water_date >= as.Date("2024-06-13"),
+         in_water_date <= as.Date("2025-02-19"))
+
+# no issue flags for bottom
+```
+
+
+#### Edmonds
+
+6-18-2024 to 2-18-25
+
+**Surface**
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 2-6-24 to 2-18-25
+surf_temp_ed <- temp |>
+  filter(site == "Edmonds",
+         datetime >= ymd_hms("2024-02-06 00:00:00") &
+           datetime <= ymd_hms("2025-02-18 00:00:00")) |>
+  rename("temp_c" = "tidbit_temp_c")
+
+# visual check
+ggplot(surf_temp_ed) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+```{r}
+# Filter to site & date range ----
+edmonds_temp_surface <- temp |>
+  filter(site == "Edmonds",
+         between(datetime, ymd_hms("2024-06-18 00:00:00"), ymd_hms("2025-02-18 23:59:59"))) |>
+  rename("temp_c" = "tidbit_temp_c")
+
+# check filter
+ggplot(edmonds_temp_surface) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+**Bottom**
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 2-6-24 to 2-18-25
+bott_temp_ed <- ph |>
+  filter(site == "Edmonds",
+         datetime >= ymd_hms("2024-02-06 00:00:00") &
+           datetime <= ymd_hms("2025-02-18 00:00:00"),
+         position == "bottom") |>
+  rename("temp_c" = "ph_temp_c")
+
+# visual check
+ggplot(bott_temp_ed) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+
+```{r}
+# combine surface and bottom
+edmonds_temp <- bind_rows(edmonds_temp_surface, bott_temp_ed)
+
+# check combine
+ggplot(edmonds_temp) +
+  geom_point(aes(x = datetime, y = temp_c)) +
+  facet_wrap(~position, ncol = 1)
+```
+
+Manually check issues against metadata
+
+```{r}
+ed_meta_temp_surface <- metadata |>
+  filter(site == "Edmonds",
+         logger_type == "temperature",
+         in_water_date >= as.Date("2024-06-10"),
+         in_water_date <= as.Date("2025-02-19"))
+
+# 1 issue flag: failure to offload. was later offloaded at office, so no action needed.
+```
+
+```{r}
+ed_meta_temp_bottom <- metadata |>
+  filter(site == "Edmonds",
+         logger_type == "ph",
+         position == "bottom",
+         in_water_date >= as.Date("2023-12-06"),
+         in_water_date <= as.Date("2025-02-19"))
+
+# no issue flags
+```
+
+**Edmonds temp data good to go for surface and bottom**
+
+#### Squaxin
+
+9-25-24 to 8-21-25;
+
+11-15-25 to 3-9-26+
+
+**Surface**
+
+Range 1:
+```{r}
+# Filter to site & date range ----
+squaxin_temp_surface <- temp |>
+  filter(site == "Squaxin Island",
+         between(datetime, ymd_hms("2024-09-25 00:00:00"), ymd_hms("2025-08-21 23:59:59"))) |>
+  rename("temp_c" = "tidbit_temp_c")
+
+# check filter
+ggplot(squaxin_temp_surface) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+Range 2:
+```{r}
+# Filter to site & date range ----
+squaxin_temp_surface2 <- temp |>
+  filter(site == "Squaxin Island",
+         datetime >= ymd_hms("2025-11-15 00:00:00")) |>
+  rename("temp_c" = "tidbit_temp_c")
+
+# check filter
+ggplot(squaxin_temp_surface2) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+
+**Bottom**
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 7-7-21 to 5-27-26
+bott_temp_sqx <- ph |>
+  filter(site == "Squaxin Island",
+         datetime >= ymd_hms("2021-07-21 00:00:00") &
+           datetime <= ymd_hms("2026-05-27 00:00:00"),
+         position == "bottom") |>
+  rename("temp_c" = "ph_temp_c")
+
+# visual check
+ggplot(bott_temp_sqx) +
+  geom_point(aes(x = datetime, y = temp_c)) +
+  facet_wrap(~position)
+```
+
+```{r}
+# Filter to site & date range ----
+squaxin_temp_bottom2 <- ph |>
+  filter(site == "Squaxin Island",
+         datetime >= ymd_hms("2025-11-15 00:00:00"),
+         position == "bottom") |>
+  rename("temp_c" = "ph_temp_c")
+
+# check filter
+ggplot(squaxin_temp_bottom2) +
+  geom_point(aes(x = datetime, y = temp_c))
+```
+
+```{r}
+# combine surface and bottom
+squaxin_temp <- bind_rows(squaxin_temp_surface, squaxin_temp_surface2,
+                          bott_temp_sqx)
+
+# check combine
+ggplot(squaxin_temp) +
+  geom_point(aes(x = datetime, y = temp_c)) +
+  facet_wrap(~position, ncol = 1)
+```
+
+Manually check issues against metadata
+
+```{r}
+sqx_meta_temp_surface <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "temperature",
+         in_water_date >= as.Date("2024-09-20"),
+         in_water_date <= as.Date("2025-08-22"))
+
+# No issue flags
+
+sqx_meta_temp_surface2 <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "temperature",
+         in_water_date >= as.Date("2025-11-10"))
+
+# No issue flags
+```
+
+```{r}
+sqx_meta_temp_bottom <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "ph",
+         position == "bottom",
+         in_water_date >= as.Date("2024-09-20"),
+         in_water_date <= as.Date("2025-08-22"))
+
+# No issue flags
+
+sqx_meta_temp_bottom2 <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "ph",
+         position == "bottom",
+         in_water_date >= as.Date("2025-11-10"))
+
+# No issue flags
+```
+
+Squaxin temp data good to go. 
+
+### Combine all temp data
+
+```{r}
+# bind temp data ----
+temperature <- bind_rows(wing_pt_temp, edmonds_temp, squaxin_temp) |>
+  select(site, position, datetime, temp_c, comments)
+
+# check combine
+ggplot(temperature) +
+  geom_point(aes(x = datetime, y = temp_c, color = site),
+             alpha = 0.5, size = 0.2) +
+  facet_wrap(~position)
+
+# check ranges
+temp_check <- temperature |>
+  group_by(site) |>
+  reframe(range = range(datetime))
+```
+
+```{r}
+# export temp data
+# write_csv(temperature, here("data", "processed", "temperature.csv"))
+```
+
+```{r}
+# clean environment
+rm(list = setdiff(ls(), c("salinity", "light", "pressure", "metadata")))
+```
+
+------------------------------------------------------------------------
+
+## Salinity
+
+#### Wing Point
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 3-19-24 to 2-26-25
+salinity_wp <- salinity |>
+  filter(site == "Wing Point",
+         datetime >= ymd_hms("2024-03-19 00:00:00") &
+           datetime <= ymd_hms("2025-02-26 00:00:00"))
+
+# visual check
+ggplot(salinity_wp) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm)) +
+  facet_wrap(~position)
+```
+
+Manually check issues against metadata
+
+```{r}
+# surface
+wp_meta_con_surface <- metadata |>
+  filter(site == "Wing Point",
+         logger_type == "conductivity",
+         position == "surface",
+         in_water_date >= as.Date("2024-03-10"),
+         in_water_date <= as.Date("2025-02-20"))
+
+# Fouling flag for 2024-09-04 to 2024-12-11
+
+
+
+
+# bottom
+wp_meta_con_bottom <- metadata |>
+  filter(site == "Wing Point",
+         logger_type == "conductivity",
+         position == "bottom",
+         in_water_date >= as.Date("2024-03-10"),
+         in_water_date <= as.Date("2025-02-20"))
+
+# No issues at benthos
+```
+
+We can offer conductivity data for:
+- Surface: 6-14-2024 to 2-26-2025
+- Bottom: 3-19-2024 to 2-26-2025
+
+Original requested range:
+- 6-14-24 to 2-26-25
+
+So, same for surface, slightly extended for bottom.
+
+#### Edmonds
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 2-6-24 to 2-18-25
+salinity_ed <- salinity |>
+  filter(site == "Edmonds",
+         datetime >= ymd_hms("2024-02-06 00:00:00") &
+           datetime <= ymd_hms("2025-02-18 00:00:00"))
+
+# visual check
+ggplot(salinity_ed) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm)) +
+  facet_wrap(~position)
+```
+
+Manually check issues against metadata
+
+```{r}
+# surface
+ed_meta_con_surface <- metadata |>
+  filter(site == "Edmonds",
+         logger_type == "conductivity",
+         position == "surface",
+         in_water_date >= as.Date("2023-12-01"),
+         in_water_date <= as.Date("2025-02-10"))
+
+# Issue flag: 2024-04-03 to 2024-06-17 recovered from bottom
+# All other surface housings at Edmonds were recovered from bottom 2023-12-14 to 2024-04-03. Also likely here. 
+# Fouling flag: 2024-09-04 to 2024-12-11
+
+
+# bottom
+ed_meta_con_bottom <- metadata |>
+  filter(site == "Edmonds",
+         logger_type == "conductivity",
+         position == "bottom",
+         in_water_date >= as.Date("2023-12-01"),
+         in_water_date <= as.Date("2025-02-10"))
+
+# No issues at benthos
+```
+
+We can offer conductivity data for:
+- Surface: 2024-06-18 to 2025-02-18
+- Bottom: 2024-02-06 to 2025-02-18
+
+Original requested range:
+- 6-18-2024 to 2-18-25
+
+```{r}
+# Filter to "good" data
+salinity_ed_surf <- salinity |>
+  filter(site == "Edmonds",
+         datetime >= ymd_hms("2024-06-18 00:00:00") &
+           datetime <= ymd_hms("2025-02-18 00:00:00"),
+         position == "surface")
+
+salinity_ed_bottom <- salinity |>
+  filter(site == "Edmonds",
+         datetime >= ymd_hms("2024-02-06 00:00:00") &
+           datetime <= ymd_hms("2025-02-18 00:00:00"),
+         position == "bottom")
+
+# combine surface and bottom at wing pt
+salinity_ed <- bind_rows(salinity_ed_surf, salinity_ed_bottom)
+
+# check combine
+ggplot(salinity_ed) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm)) +
+  facet_wrap(~position, ncol = 1)
+```
+
+
+
+#### Squaxin
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 7-7-21 to 5-27-26
+salinity_sqx <- salinity |>
+  filter(site == "Squaxin Island",
+         datetime >= ymd_hms("2021-07-21 00:00:00") &
+           datetime <= ymd_hms("2026-05-27 00:00:00"))
+
+# visual check
+ggplot(salinity_sqx) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm)) +
+  facet_wrap(~position)
+```
+
+Manually check issues against metadata
+
+```{r}
+# surface
+sqx_meta_con_surface <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "conductivity",
+         position == "surface"#,
+         # in_water_date >= as.Date("2023-12-01"),
+         # in_water_date <= as.Date("2025-02-10")
+         )
+
+# Only 1 fouling flag 2025-03-07 to 2025-05-15
+
+
+# bottom
+sqx_meta_con_bottom <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "conductivity",
+         position == "bottom"#,
+         # in_water_date >= as.Date("2023-12-01"),
+         # in_water_date <= as.Date("2025-02-10")
+         )
+
+# Bad data from 2025-08-22 to 2026-03-10
+```
+
+We can offer conductivity data for:
+- Surface: 2024-09-25 to 2026-03-09
+- Bottom: 2024-09-25 to 2025-08-22
+
+Original requested range:
+- 11-15-25 to 3-9-26+
+
+```{r}
+# Filter to final ranges
+sal_sqx_surf <- salinity_sqx |>
+  filter(datetime >= ymd_hms("2024-09-25 00:00:00") &
+           datetime <= ymd_hms("2026-03-09 00:00:00"),
+         position == "surface")
+
+ggplot(sal_sqx_surf) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm))
+
+sal_sqx_bot <- salinity_sqx |>
+  filter(datetime >= ymd_hms("2024-09-25 00:00:00") &
+           datetime <= ymd_hms("2025-08-22 00:00:00"),
+         position == "bottom")
+
+ggplot(sal_sqx_bot) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm))
+
+salinity_sqx <- bind_rows(sal_sqx_surf, sal_sqx_bot)
+
+# visual check
+ggplot(salinity_sqx) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm)) +
+  facet_wrap(~position)
+```
+### Combine all con data
+
+```{r}
+# bind con data ----
+conductivity <- bind_rows(salinity_wp, salinity_ed, salinity_sqx) |>
+  rename("temp_c" = "con_temp_c") |>
+  select(site, position, datetime, high_range_microsiemens_per_cm,
+         temp_c,comments)
+
+# check combine
+ggplot(conductivity) +
+  geom_point(aes(x = datetime, y = high_range_microsiemens_per_cm, color = site),
+             alpha = 0.5, size = 0.2) +
+  facet_wrap(~position)
+
+# check ranges
+con_check <- conductivity |>
+  group_by(site) |>
+  reframe(range = range(datetime))
+```
+
+```{r}
+# save file
+# write_csv(conductivity,
+#           here("data", "processed", "conductivity.csv"))
+```
+
+```{r}
+# clean environment
+rm(list = setdiff(ls(), c("light", "pressure", "metadata")))
+```
+
+## Light
+
+Light is only collected at the benthos.
+
+#### Wing Point
+
+6-14-24 to 2-26-25
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 3-19-24 to 2-26-25
+light_wp <- light |>
+  filter(site == "Wing Point",
+         datetime >= ymd_hms("2024-03-19 00:00:00") &
+           datetime <= ymd_hms("2025-02-26 00:00:00"))
+
+# visual check
+ggplot(light_wp) +
+  geom_point(aes(x = datetime, y = raw_integrating_light))
+```
+Data starts 2024-09-05
+
+Manually check issues against metadata
+
+```{r}
+# surface
+wp_meta_light <- metadata |>
+  filter(site == "Wing Point",
+         logger_type == "par",
+         in_water_date >= as.Date("2024-09-01"),
+         in_water_date <= as.Date("2025-02-20"))
+```
+
+Only 1 flag for fouling. 
+
+Checking serial number against calibration estimated values:
+- sensor 13063 (nickname = PSRF03) = 0.04648728467
+- sensor 15604 (nickname = PAR2) = 0.07560545193
+
+```{r}
+# calibrate par values ----
+light_wp <- light_wp |>
+  filter(datetime >= ymd_hms("2024-09-05 00:00:00") &
+           datetime <= ymd_hms("2025-02-26 00:00:00")) |>
+  mutate(calibrated_integrating_light = case_when(
+    logger_id == "PSRF03" ~ raw_integrating_light * 0.04648728467,
+    logger_id == "PAR2" ~ raw_integrating_light * 0.07560545193,
+    .default = calibrated_integrating_light
+  ))
+
+# visual check
+ggplot(light_wp) +
+  geom_point(aes(x = datetime, y = calibrated_integrating_light))
+```
+
+Good
+
+#### Edmonds
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 2-6-24 to 2-18-25
+light_ed <- light |>
+  filter(site == "Edmonds",
+         datetime >= ymd_hms("2024-02-06 00:00:00") &
+           datetime <= ymd_hms("2025-02-18 00:00:00"))
+
+# visual check
+ggplot(light_ed) +
+  geom_point(aes(x = datetime, y = raw_integrating_light))
+```
+
+```{r}
+ed_meta_light <- metadata |>
+  filter(site == "Edmonds",
+         logger_type == "par",
+         in_water_date >= as.Date("2023-12-01"),
+         in_water_date <= as.Date("2025-02-10"))
+```
+
+2024-06-17 to 2024-09-04 instrument offload fail
+next deployment not until 2025-01-14
+
+No other issue flags
+
+Checking calibration
+
+15605 (nickname = PAR3) 0.08377513014
+6428 (nickname = DNR6428) 0.0586289299
+13063 (nickname = PSRF03) 0.04648728467
+
+2025-01-15 2025-02-18
+
+```{r}
+# Filter dates and calibrate
+light_ed <- light_ed |>
+  # filter(datetime >= ymd_hms("2024-02-06 00:00:00") &
+  #          datetime <= ymd_hms("2024-06-12 00:00:00"),
+  #        datetime >= ymd_hms("2025-01-15 00:00:00") &
+  #          datetime <= ymd_hms("2025-02-18 00:00:00")) |>
+  filter(!between(datetime, ymd_hms("2024-06-12 00:00:00"), ymd_hms("2025-01-15 00:00:00"))) |>
+  mutate(calibrated_integrating_light = case_when(
+    logger_id == "PAR3" ~ raw_integrating_light * 0.08377513014,
+    logger_id == "DNR6428" ~ raw_integrating_light * 0.0586289299,
+    logger_id == "PSRF03" ~ raw_integrating_light * 0.04648728467,
+    .default = calibrated_integrating_light
+  ))
+
+# visual check
+ggplot(light_ed) +
+  geom_point(aes(x = datetime, y = calibrated_integrating_light))
+```
+
+
+#### Squaxin
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 7-7-21 to 5-27-26
+light_sqx <- light |>
+  filter(site == "Squaxin Island",
+         datetime >= ymd_hms("2021-07-21 00:00:00") &
+           datetime <= ymd_hms("2026-05-27 00:00:00"))
+
+# visual check
+ggplot(light_sqx) +
+  geom_point(aes(x = datetime, y = raw_integrating_light))
+```
+
+```{r}
+sqx_meta_light <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "par",
+         in_water_date >= as.Date("2021-07-01"),
+         in_water_date <= as.Date("2026-05-20"))
+```
+
+Some no data issue flags, but all data present
+
+Check calibrations:
+15603 (PAR1) NOT CALIBRATED
+13065 (PSRF5) 0.0598230157
+13061 (PSRF1) 0.1328461756
+16979 (PAR8) NOT CALIBRATED
+15606 (PAR4) NOT CALIBRATED
+
+```{r}
+light_sqx <- light_sqx |>
+  filter(datetime >= ymd_hms("2024-12-07 00:00:00") &
+           datetime <= ymd_hms("2025-05-14 00:00:00")) |>
+  mutate(calibrated_integrating_light = case_when(
+    logger_id == "PSRF5" ~ raw_integrating_light * 0.0598230157,
+    logger_id == "PSRF1" ~ raw_integrating_light * 0.1328461756,
+    .default = calibrated_integrating_light
+  ))
+
+# visual check
+ggplot(light_sqx) +
+  geom_point(aes(x = datetime, y = calibrated_integrating_light))
+```
+
+### Combine all light data
+
+```{r}
+# bind light data ----
+light <- bind_rows(light_wp, light_ed, light_sqx) |>
+  select(site, position, datetime, logger_id,
+         raw_integrating_light, calibrated_integrating_light,
+         comments)
+
+# check combine
+ggplot(light) +
+  geom_point(aes(x = datetime, y = calibrated_integrating_light, color = site),
+             alpha = 0.5, size = 0.2) # hmm
+
+# check ranges
+light_check <- light |>
+  group_by(site) |>
+  reframe(range = range(datetime))
+```
+
+```{r}
+# save file
+# write_csv(light,
+#           here("data", "processed", "light.csv"))
+```
+
+```{r}
+# clean environment
+rm(list = setdiff(ls(), c("pressure", "metadata")))
+```
+
+## Pressure
+
+#### Wing Point
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 3-19-24 to 2-26-25
+pressure_wp <- pressure |>
+  filter(site == "Wing Point",
+         datetime >= ymd_hms("2024-03-19 00:00:00") &
+           datetime <= ymd_hms("2025-02-26 00:00:00"))
+
+# visual check
+ggplot(pressure_wp) +
+  geom_point(aes(x = datetime, y = abs_pres_kpa))
+```
+
+```{r}
+# check metadata issue flags
+wp_meta_pres <- metadata |>
+  filter(site == "Wing Point",
+         logger_type == "water level",
+         in_water_date >= as.Date("2023-12-01"),
+         in_water_date <= as.Date("2025-02-20"))
+```
+
+No issue flags
+
+range available: 2024-03-19 to 2025-02-26
+
+#### Edmonds
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 2-6-24 to 2-18-25
+pres_ed <- pressure |>
+  filter(site == "Edmonds",
+         datetime >= ymd_hms("2024-02-06 00:00:00") &
+           datetime <= ymd_hms("2025-02-18 00:00:00"))
+
+# visual check
+ggplot(pres_ed) +
+  geom_point(aes(x = datetime, y = abs_pres_kpa))
+```
+
+```{r}
+# check metadata issue flags
+ed_meta_pres <- metadata |>
+  filter(site == "Edmonds",
+         logger_type == "water level",
+         in_water_date >= as.Date("2023-12-01"),
+         in_water_date <= as.Date("2025-02-20"))
+```
+
+No issue flags
+
+date range: 2024-02-06 to 2025-02-18
+
+#### Squaxin
+
+```{r}
+# Check overlap with DNR range ---- 
+# DNR range: 7-7-21 to 5-27-26
+pres_sqx <- pressure |>
+  filter(site == "Squaxin Island",
+         datetime >= ymd_hms("2021-07-21 00:00:00") &
+           datetime <= ymd_hms("2026-05-27 00:00:00"))
+
+# visual check
+ggplot(pres_sqx) +
+  geom_point(aes(x = datetime, y = abs_pres_kpa))
+```
+```{r}
+# check metadata issue flags
+sqx_meta_pres <- metadata |>
+  filter(site == "Squaxin Island",
+         logger_type == "water level",
+         in_water_date >= as.Date("2021-07-21"),
+         in_water_date <= as.Date("2026-05-27"))
+```
+
+ranges: 2024-09-25 to 2025-08-21, 2025-11-15 to 2026-03-09
+Missing file because named wrong in drive - fixing now !! 
+
+```{r}
+# fill hole in data ----
+
+# read in missing file
+sqx_fix <- read_csv(here("data", "SquaxinIsland_WLBT1_2025-08-22.csv")) |>
+  janitor::clean_names()
+
+# cleaning steps
+# parse date time
+sqx_fix <- sqx_fix |>
+      mutate(datetime = parse_date_time(date_time_pdt, 
+                                        orders = c("m/d/y I:M:S p", 
+                                                   "m/d/y HMS", 
+                                                   "m/d/y HM")))
+# filter to missing dates when logger is in water
+sqx_fix <- sqx_fix |>
+  filter(datetime >= ymd_hms("2025-08-23 00:00:00") &
+           datetime < ymd_hms("2025-11-14 00:00:00"))
+
+# rename cols and add missing
+sqx_fix <- sqx_fix |>
+  mutate(wl_temp_c = temperature_c,
+         abs_pres_kpa = absolute_pressure_k_pa,
+         site = "Squaxin Island",
+         position = "bottom",
+         logger_id = NA_character_,
+         logger_type = "water level",
+         issue_flag = NA_character_,
+         comments = NA_character_) 
+
+# select cols to match data
+sqx_fix <- sqx_fix |>
+  select(c("site", "position", "datetime", "logger_id", "logger_type",
+           "issue_flag", "comments", "wl_temp_c", "abs_pres_kpa"))
+
+# combine
+pres_sqx_filled <- rbind(pres_sqx, sqx_fix) |>
+  arrange(datetime) |>
+  filter(!is.na(abs_pres_kpa))
+
+# visual check
+ggplot(pres_sqx_filled) +
+  geom_point(aes(x = datetime, y = abs_pres_kpa))
+```
+
+### Combine all pressure data
+
+```{r}
+# bind pres data ----
+pressure <- bind_rows(pressure_wp, pres_ed, pres_sqx_filled) |>
+  select(site, position, datetime, wl_temp_c, abs_pres_kpa,
+         comments) |>
+  rename("temp_c" = "wl_temp_c",
+         "absolute_pressure_kpa" = "abs_pres_kpa")
+
+# check combine
+ggplot(pressure) +
+  geom_point(aes(x = datetime, y = absolute_pressure_kpa, color = site),
+             alpha = 0.5, size = 0.2)
+
+# check ranges
+pressure_check <- pressure |>
+  group_by(site) |>
+  reframe(range = range(datetime))
+```
+```{r}
+# save file
+# write_csv(pressure,
+#           here("data", "processed", "pressure.csv"))
+```

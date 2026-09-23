@@ -1,0 +1,143 @@
+---
+title: "New Instrument Metadata Format"
+format: html
+---
+
+This script was used to create a new metadata sheet for Eyes on Kelp Index continuous environmental sensor data. 
+
+Main changes include converting file from wide format to long, so each datafile points to a new row.
+
+
+## Setup
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(janitor)
+library(googledrive)
+library(googlesheets4)
+library(lubridate)
+
+
+# Link to the metadata sheet
+metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098"
+
+# Name of the tab with the file metadata
+sheet_name = " Deployments_IndexOnly"
+```
+
+
+## Reformatting
+
+```{r}
+# Read in metadata sheet from google drive
+metadata_raw <- read_sheet(metadata_file_url,
+                           sheet = sheet_name,
+                           na = c("", "n/a", "#N/A"),
+                           col_types = "c")
+
+# Cleaning
+metadata <- metadata_raw |>
+  clean_names() |>
+  # Make position consistently lowercase
+  mutate(position = tolower(position)) |>
+  # Remove rows that are year separators
+  filter(!(str_detect(site, "^20\\d{2}$"))) |>
+  # Make site name capital with space. e.g., North Beach
+  mutate(site = str_replace_all(site, "(?<=[a-z])(?=[A-Z])", " ")) |>
+  # Parse dates from varying formats
+  mutate(initial_deployment_date = 
+           parse_date_time(initial_deployment_date,
+                           orders = c("ymd", "mdy")),
+         relaunch_date =
+           parse_date_time(relaunch_date,
+                           orders = c("ymd", "mdy")),
+         recovery_date = 
+           parse_date_time(recovery_date,
+                           orders = c("ymd", "mdy")),
+         relaunch_data_readout_date = 
+           parse_date_time(relaunch_data_readout_date,
+                           orders = c("ymd", "mdy"))) |>
+  rename("serial_number" = "sn")
+
+# Make initial deployment file
+initial <- metadata |>
+  mutate(deployment_type = "initial",
+         in_water_date = initial_deployment_date,
+         in_water_time = initial_deployment_time,
+         # out of water date is either relaunch date, 
+         # or if there was no relaunch, it is recovery date.
+         # coalesce() finds the first non-missing value at each position
+         out_of_water_date = coalesce(relaunch_date, recovery_date),
+         out_of_water_time = coalesce(relaunch_recovery_time, recovery_time),
+         data_readout_date = relaunch_data_readout_date,
+         issue_flag = issue_flag_deployment,
+         comments = comments_for_initial_deployment) |>
+  select(site, position, nickname, serial_number,
+         deployment_type, launch_date_office,
+         in_water_date, in_water_time, 
+         out_of_water_date, out_of_water_time,
+         data_readout_date, issue_flag, comments) |>
+  # make sure dates are dates
+  mutate(launch_date_office = as.Date(launch_date_office),
+         out_of_water_date = as.Date(out_of_water_date),
+         in_water_date = as.Date(in_water_date),
+         data_readout_date = as.Date(data_readout_date))
+
+# Make relaunch deployment file
+relaunch <- metadata |>
+  # Remove rows when sensor was not relaunched
+  filter(!is.na(relaunch_date)) |>
+  mutate(deployment_type = "relaunch",
+         launch_date_office = NA_Date_, 
+         in_water_date = relaunch_date,
+         in_water_time = relaunch_deployment_time,
+         out_of_water_date = recovery_date,
+         out_of_water_time = recovery_time,
+         data_readout_date = relaunch_data_readout_date,
+         issue_flag = issue_flag_relaunch,
+         comments = case_when(
+           !is.na(comments_for_relaunch_deployment) & 
+             !is.na(comments_recovery) ~
+             paste(comments_for_relaunch_deployment,
+                   comments_recovery, sep = ", "),
+           !is.na(comments_for_relaunch_deployment) ~
+             comments_for_relaunch_deployment,
+           !is.na(comments_recovery) ~
+             comments_recovery,
+           TRUE ~ NA_character_
+         )) |>
+  select(site, position, nickname, serial_number,
+         deployment_type, launch_date_office,
+         in_water_date, in_water_time, 
+         out_of_water_date, out_of_water_time,
+         data_readout_date, issue_flag, comments) |>
+  # make sure dates are dates
+  mutate(out_of_water_date = as.Date(out_of_water_date),
+         in_water_date = as.Date(in_water_date),
+         data_readout_date = as.Date(data_readout_date))
+
+# Combine initial and relaunch files
+metadata_long <- bind_rows(initial, relaunch) |>
+  arrange(in_water_date, site, position)
+
+# Add columns logger type & filename
+metadata_long <- metadata_long |>
+  mutate(
+    logger_type = case_when(
+      grepl("^T\\d", nickname) ~ "temperature",
+      grepl("^WLBT|^WL|^TP", nickname) ~ "water level",
+      nickname == "AIR" ~ "water level",
+      grepl("^CON", nickname) ~ "conductivity",
+      grepl("^DO", nickname) ~ "dissolved oxygen",
+      grepl("^pH", nickname) ~ "ph",
+      grepl("^PAR|^PSRF|^DNR", nickname) ~ "par",
+      .default = NA),
+    file_name = paste(gsub(" ", "", site), nickname, in_water_date, sep = "_")
+    )
+
+write_csv(metadata_long, file = here("data", "reorganized_metadata.csv"))
+```
+
+
+
