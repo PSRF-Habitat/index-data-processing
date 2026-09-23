@@ -946,8 +946,32 @@ ggsave(here::here("figures", "jh_surface_con_issues.png"), jh_surface_con_issues
 ## Issue plots for each site / sensor type / position
 
 ```{r}
+# look at JH surface CON for flag plot troubleshooting
+jh_surf_con <- logger_data_con |>
+  filter(site == "Jefferson Head",
+         position == "surface")
+
+# something werid with joining in flags ): some troubleshooting:
+test_meta <- read_and_clean_metadata(metadata_file_url, sheet_name) |>
+  filter(site == "Jefferson Head", position == "surface", logger_type == "conductivity") |>
+  select(site, position, logger_type, in_water_date, out_of_water_date, issue_flag, comments) |>
+  mutate(in_water_date = as.POSIXct(in_water_date),
+         out_of_water_date = as.POSIXct(out_of_water_date))
+# test the join
+jh_surf_con |>
+  left_join(test_meta |> rename(flag_fill = issue_flag, comments_fill = comments),
+            join_by(site, position, logger_type,
+                    datetime > in_water_date,
+                    datetime < out_of_water_date)) |>
+  select(datetime, issue_flag, flag_fill) |>
+  filter(datetime >= "2025-06-03", datetime <= "2025-06-06") |>
+  print(n = 100)
+
+# hmm. going to try flipping the order of flag grabs in coalese()
+# i could grab all the flags at the end, but i still kind of want to make this more efficient later, which would mean only going through some of the data and filling / grabbing flags at the end. so i will leave for now
+
 # Get unique site/position combos in con
-site_pos_combos <- con |> distinct(site, position)
+site_pos_combos <- temp |> distinct(site, position)
 
 plot_sensor_issues <- function(data, site_name, pos, sensor_col, y_label, title_sensor) {
   
@@ -987,28 +1011,40 @@ plot_sensor_issues <- function(data, site_name, pos, sensor_col, y_label, title_
          subtitle = "Data issues for deployments highlighted behind points",
          y        = y_label,
          fill     = "Issue Flag") +
-    facet_wrap(~ year, scales = "free_x", ncol = 1) +
+    facet_wrap(~ year, 
+               scales = "free_x", 
+               ncol = 1) +
     theme_minimal(base_size = 12) +
     theme(plot.title.position = "plot")
 }
 
 # Generate a plot for each site/position combo in con
-con_plots <- pmap(site_pos_combos, function(site, position) {
-  plot_sensor_issues(con, site, position,
-                     sensor_col   = "high_range_microsiemens_per_cm",
-                     y_label      = "Conductivity (µS/cm)",
-                     title_sensor = "Conductivity")
+temp_plots <- pmap(site_pos_combos, function(site, position) {
+  plot_sensor_issues(temp, site, position,
+                     sensor_col   = "tidbit_temp_c",
+                     y_label      = "Temperature (°C)",
+                     title_sensor = "Temperature")
 })
 
 # Name the list for easy reference
-names(con_plots) <- paste(site_pos_combos$site, site_pos_combos$position, sep = " - ")
+names(temp_plots) <- paste(site_pos_combos$site, site_pos_combos$position, sep = " - ")
 
 # View them one at a time by index or name
 con_plots[[1]]
 con_plots[["Jefferson Head - surface"]]
+con_plots[["Squaxin Island - bottom"]]
 
 # Or scroll through all at once
-walk(con_plots[!sapply(con_plots, is.null)], print)
+walk(temp_plots[!sapply(temp_plots, is.null)], print)
+
+
+#hmm... why no 2023 data showing for wing point surface con?
+wp_con <- logger_data_con |>
+  filter(site == "Wing Point",
+         position == "surface")
+
+# Squaxin island surface CON fouling note:
+# The deployment that is 
 
 # Con check
 con |>
@@ -1120,5 +1156,62 @@ metadata <- read_and_clean_metadata(metadata_file_url, sheet_name)
 
 I think this is working as expected! Now I need to change the logic in the logger csv cleaning to match new metadata style
 
+
+
+---
+
+```{r}
+ph |>
+ filter(site %in% c("Edmonds", "Centennial Park", "Wing Point"),
+        position == "bottom") |>
+  ggplot(aes(x = datetime, y = ph_temp_c)) +
+  geom_line() +
+  facet_wrap(~site)
+
+cp <- ph |>
+  filter(site == "Centennial Park",
+         position == "bottom")
+
+unique(cp$issue_flag)
+
+ed <- ph |>
+  filter(site == "Edmonds",
+         position == "bottom")
+
+unique(ed$issue_flag)
+
+wp <- ph |>
+  filter(site == "Wing Point",
+         position == "bottom")
+
+
+plot_issue_flags(wp, "ph_temp_c", "sst", "temp")
+
+ed <- ed |>
+  mutate(tidbit_temp_c = case_when(issue_flag == "Instrument- Recovered from bottom" ~ NA_real_,
+                                   .default = tidbit_temp_c))
+
+wp %>%
+  arrange(datetime) %>%
+  filter(!is.na(ph_temp_c)) %>%
+  mutate(
+    gap_days = as.numeric(datetime - lag(datetime), units = "days"),
+    grp = cumsum(coalesce(gap_days > 2, FALSE))
+  ) %>%
+  summarise(
+    start = min(datetime),
+    end = max(datetime),
+    .by = grp
+  )
+```
+
+# Test new metadata function for reformatted tidy metadata sheet
+
+9/4/2026
+
+```{r}
+read_and_clean_metadata(metadata_file_url = metadata_file_url,
+                        sheet_name = sheet_name)
+```
 
 

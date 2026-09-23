@@ -303,9 +303,6 @@ sst_plots[["Jefferson Head - surface"]]
 need to figure out a way to only show bottom for this one!!!!
 
 ```{r}
-# NEED TO WORK ON THIS ONE ----
-# see notes ----
-
 # Build plots
 temp_bottom_plots <- plot_issue_flags(data$ph, "ph_temp_c", "Temperature (°C)", "Temperature")
 
@@ -316,9 +313,6 @@ walk(temp_bottom_plots[!sapply(temp_bottom_plots, is.null)], print)
 temp_bottom_plots[["Jefferson Head - bottom"]]
 ```
 
-Is there a common name for bottom temp like there is for sst? Huh. 
-
-NEED TO DECIDE which logger we want to use for bottom temp. Make time to poke around and see what is the most reliable. Perhaps Sophie has an idea about this already?
 
 ## pH
 
@@ -388,8 +382,6 @@ walk(par_plots[!sapply(par_plots, is.null)], print)
 # Or refer to by name
 par_plots[["Jefferson Head - bottom"]]
 ```
-
-
 
 
 
