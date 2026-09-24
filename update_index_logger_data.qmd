@@ -119,8 +119,10 @@ Replace the values in the quotation marks `" "` if necessary.
 # Folder ID found after the final / in the folder's URL
 # root_folder_id = "1k5u8iOhR5alnymc7BVU-JJjcSnQStgWv"
 
-# FOR MARINA TESTING
-root_folder_id = "1TarMgY-SC4L-iTCyeuo-6UVwP9Gaj6U0"
+# # FOR MARINA TESTING
+# root_folder_id = "1TarMgY-SC4L-iTCyeuo-6UVwP9Gaj6U0"
+## MARINA TESTING EVEN SMALLER
+root_folder_id = "1HYfpizZ_6jt-9hjKtPPsnwBz4lQM0JQQ"
 
 # Link to the metadata sheet
 metadata_file_url = "https://docs.google.com/spreadsheets/d/1JJ4Vtb_pI9FJRvMYg7pbhQzM6JPcFzGVU3rR9IdYnGQ/edit?gid=1334564098#gid=1334564098"
@@ -233,30 +235,41 @@ data <- update_logger_data_incremental(root_folder_id = root_folder_id,
 ## Step 5: Export as CSV to Google Drive
 
 ```{r}
-
 # ===== Logger Data ===== #
-# Generate filename with today's date
 today <- Sys.Date()
-csv_filename <- paste0("kelp_index_combined_sensor_data_", today, ".csv")
-rds_filename <- paste0("kelp_index_combined_sensor_data_", today, ".rds")
 
-# Create temporary CSV file
-temp_csv <- tempfile(fileext = ".csv")
-write_csv(data, temp_csv)
+# Full descriptive names for filenames
+sensor_names <- c(
+  temp = "temperature",
+  ph   = "ph",
+  do   = "dissolved_oxygen",
+  wl   = "water_level",
+  par  = "par",
+  con  = "conductivity"
+)
 
-# Upload CSV to Google Drive
-drive_upload(media = temp_csv,
-             name = csv_filename,
-             path = as_id("1uGfyiyj-xAdy6xM2j81l7jDZK9SgNBw6"),
-             overwrite = TRUE)
-
-# Also upload RDS version -- OPTIONAL! RDS use less memory, better for extremely large files
-# temp_rds <- tempfile(fileext = ".rds")
-# saveRDS(data, temp_rds)
-# drive_upload(media = temp_csv,
-#              name = rds_filename,
-#              path = as_id("1uGfyiyj-xAdy6xM2j81l7jDZK9SgNBw6"),
-#              overwrite = TRUE)
+# Loop through each sensor type in the list and upload separately
+for (sensor_type in names(data)) {
+  
+  df <- data[[sensor_type]]
+  
+  # Use the full name
+  full_name <- ifelse(sensor_type %in% names(sensor_names),
+                       sensor_names[[sensor_type]],
+                       sensor_type)
+  
+  csv_filename <- paste0("kelp_index_", full_name, "_sensor_data_", today, ".csv")
+  
+  temp_csv <- tempfile(fileext = ".csv")
+  write_csv(df, temp_csv)
+  
+  drive_upload(media = temp_csv,
+               name = csv_filename,
+               path = as_id("1uGfyiyj-xAdy6xM2j81l7jDZK9SgNBw6"),
+               overwrite = TRUE)
+  
+  unlink(temp_csv)
+}
 
 
 # ===== List of processed files ===== #
@@ -264,19 +277,15 @@ processed_filename <- paste0("processed_files_", today, ".csv")
 processed_files <- read_rds(here("data", "processed_files.rds"))
 processed_files <- as.data.frame(processed_files)
 
-# Create temporary CSV file
 temp_csv <- tempfile(fileext = ".csv")
 write_csv(processed_files, temp_csv)
 
-# Upload CSV to Google Drive
 drive_upload(media = temp_csv,
              name = processed_filename,
              path = as_id("1uGfyiyj-xAdy6xM2j81l7jDZK9SgNBw6"),
              overwrite = TRUE)
 
-# Clean up temp files
 unlink(temp_csv)
-unlink(temp_rds)
 ```
 
 # Data Review
@@ -295,7 +304,7 @@ sst_plots <- plot_issue_flags(data$temp, "tidbit_temp_c", "Temperature (°C)", "
 walk(sst_plots[!sapply(sst_plots, is.null)], print)
 
 # Or refer to by name
-sst_plots[["Jefferson Head - surface"]]
+sst_plots[["Centennial Park - surface"]]
 ```
 
 ## Temp - bottom
