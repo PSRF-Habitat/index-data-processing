@@ -227,7 +227,7 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
                                                   ignore_case = TRUE)))
   
   if (verbose) {
-    cli_alert_info(paste("Site:", site_name,
+    cli::cli_alert_info(paste("Site:", site_name,
                          " | Logger ID:", file_logger_id,
                          " | Date deployed:", deployment_date))
   }
@@ -241,14 +241,14 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
   
   # Warning if no match in metadata
   if (nrow(meta_row) == 0) {
-    cli_alert_warning(paste("No metadata match for file:", file_name,
+    cli::cli_alert_warning(paste("No metadata match for file:", file_name,
                             "- check site name, logger_id, and deployment date in metadata sheet"))
     return(NULL)
   }
   
   # Warning if multiple matches
   if (nrow(meta_row) > 1) {
-    cli_alert_warning(paste("Multiple metadata matches for:", file_name, "- using first row. Check file name and metadata sheet"))
+    cli::cli_alert_warning(paste("Multiple metadata matches for:", file_name, "- using first row. Check file name and metadata sheet"))
     meta_row <- meta_row[1, ]
   }
   
@@ -261,21 +261,21 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
   comments <- meta_row$comments
   
   if (verbose) {
-    cli_alert_info(paste("Position:", position, "| Type:", deployment_type,
+    cli::cli_alert_info(paste("Position:", position, "| Type:", deployment_type,
                          "| In:", in_water_date, "| Out:", out_of_water_date))
-    cli_alert_info(paste("Issue flag:", issue_flag, "| Comments:", comments))
-    cli_alert_info(paste("Sensor type:", sensor_type))
+    cli::cli_alert_info(paste("Issue flag:", issue_flag, "| Comments:", comments))
+    cli::cli_alert_info(paste("Sensor type:", sensor_type))
   }
   
   # Download csv to temp file
   temp_path <- tempfile(fileext = ".csv")
   if (length(file_id) != 1) {     # Error if there are duplicate files
-    cli_abort("drive_download() aborted: file_id is not unique.")
+    cli::cli_abort("drive_download() aborted: file_id is not unique.")
   }
   drive_download(as_id(file_id), path = temp_path, overwrite = TRUE)
   
   if (verbose) {
-    cli_alert_info(paste("File downloaded to:", temp_path))
+    cli::cli_alert_info(paste("File downloaded to:", temp_path))
   }
   
   ##### TEMP LOGGER #####
@@ -293,12 +293,12 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     
     # Fallback in case no header line is found
     if (is.na(header_line)) {
-      cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
+      cli::cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     
     if (verbose) {
-      cli_alert_info(paste("Skipping", skip_n, "lines"))
+      cli::cli_alert_info(paste("Skipping", skip_n, "lines"))
     }
     
     # Read in the csv
@@ -306,8 +306,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     
     # Check that the header row was correctly read in
     if (verbose) {
-      cli_alert_info("Columns detected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns detected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     # Only keep the rows with actual data
@@ -316,8 +316,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
              contains("temp", ignore.case = TRUE))
     # Check that the columns kept were correct
     if (verbose) {
-      cli_alert_info("Columns selected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns selected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     df <- df |>
@@ -345,8 +345,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
       select(-date)
     
     if (verbose) {
-      cli_alert_info(paste("Rows after filtering:", nrow(df)))
-      cli_alert_success(paste("Finished processing", file_name))
+      cli::cli_alert_info(paste("Rows after filtering:", nrow(df)))
+      cli::cli_alert_success(paste("Finished processing", file_name))
     }
   }
   
@@ -363,19 +363,19 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     )[1]
     
     if (is.na(header_line)) {
-      cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
+      cli::cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     
     if (verbose) {
-      cli_alert_info(paste("Skipping", skip_n, "lines"))
+      cli::cli_alert_info(paste("Skipping", skip_n, "lines"))
     }
     
     df <- suppressWarnings(read_csv(temp_path, skip = skip_n, show_col_types = FALSE))
     
     if (verbose) {
-      cli_alert_info("Columns detected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns detected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     ph_matches <- names(df)[str_detect(names(df), regex("ph", ignore_case = TRUE)) &
@@ -398,8 +398,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     }
     
     if (verbose) {
-      cli_alert_info("Columns selected:")
-      cli_alert_info(paste(names(selected_cols), collapse = ", "))
+      cli::cli_alert_info("Columns selected:")
+      cli::cli_alert_info(paste(names(selected_cols), collapse = ", "))
     }
     
     df <- selected_cols |>
@@ -438,8 +438,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
       select(-date)
     
     if (verbose) {
-      cli_alert_info(paste("Rows after filtering:", nrow(df)))
-      cli_alert_success(paste("Finished processing", file_name))
+      cli::cli_alert_info(paste("Rows after filtering:", nrow(df)))
+      cli::cli_alert_success(paste("Finished processing", file_name))
     }
   }
   
@@ -456,20 +456,20 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     )[1]
     
     if (is.na(header_line)) {
-      cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
+      cli::cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     
     if (verbose) {
-      cli_alert_info(paste("Skipping", skip_n, "lines"))
+      cli::cli_alert_info(paste("Skipping", skip_n, "lines"))
     }
     
     df <- suppressWarnings(read_csv(temp_path, skip = skip_n, show_col_types = FALSE)) |>
       clean_names()
     
     if (verbose) {
-      cli_alert_info("Columns detected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns detected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     pres_col <- names(df)[str_detect(names(df), "pres")][1]
@@ -477,9 +477,9 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     temp_col <- names(df)[str_detect(names(df), "temp")][1]
     
     if (verbose) {
-      cli_alert_info(paste("Pressure column:", pres_col))
-      cli_alert_info(paste("Datetime column:", datetime_col))
-      cli_alert_info(paste("Temp column:", temp_col))
+      cli::cli_alert_info(paste("Pressure column:", pres_col))
+      cli::cli_alert_info(paste("Datetime column:", datetime_col))
+      cli::cli_alert_info(paste("Temp column:", temp_col))
     }
     
     unit <- case_when(
@@ -489,7 +489,7 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     )
     
     if (verbose) {
-      cli_alert_info(paste("Detected unit:", unit))
+      cli::cli_alert_info(paste("Detected unit:", unit))
     }
     
     df <- df |>
@@ -503,9 +503,9 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
       select(-abs_pres)
     
     if (verbose) {
-      cli_alert_info("Columns selected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
-      cli_alert_info(paste("Rows before filtering:", nrow(df)))
+      cli::cli_alert_info("Columns selected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info(paste("Rows before filtering:", nrow(df)))
     }
     
     df <- df |>
@@ -536,8 +536,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
       select(-date)
     
     if (verbose) {
-      cli_alert_info(paste("Rows after filtering:", nrow(df)))
-      cli_alert_success(paste("Finished processing", file_name))
+      cli::cli_alert_info(paste("Rows after filtering:", nrow(df)))
+      cli::cli_alert_success(paste("Finished processing", file_name))
     }
   }
   
@@ -555,19 +555,19 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     )[1]
     
     if (is.na(header_line)) {
-      cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
+      cli::cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     
     if (verbose) {
-      cli_alert_info(paste("Skipping", skip_n, "lines"))
+      cli::cli_alert_info(paste("Skipping", skip_n, "lines"))
     }
     
     df <- suppressWarnings(read_csv(temp_path, skip = skip_n, show_col_types = FALSE))
     
     if (verbose) {
-      cli_alert_info("Columns detected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns detected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     df <- df |>
@@ -576,8 +576,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
              contains("range", ignore.case = TRUE))
     
     if (verbose) {
-      cli_alert_info("Columns selected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns selected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     df <- df |>
@@ -619,8 +619,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
       select(-date)
     
     if (verbose) {
-      cli_alert_info(paste("Rows after filtering:", nrow(df)))
-      cli_alert_success(paste("Finished processing", file_name))
+      cli::cli_alert_info(paste("Rows after filtering:", nrow(df)))
+      cli::cli_alert_success(paste("Finished processing", file_name))
     }
   }
   
@@ -637,19 +637,19 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     )[1]
     
     if (is.na(header_line)) {
-      cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
+      cli::cli_alert_warning(paste("No valid header found in", file_name, "- defaulting to skip = 0"))
     }
     skip_n <- if (!is.na(header_line)) header_line - 1 else 0
     
     if (verbose) {
-      cli_alert_info(paste("Skipping", skip_n, "lines"))
+      cli::cli_alert_info(paste("Skipping", skip_n, "lines"))
     }
     
     df <- suppressWarnings(read_csv(temp_path, skip = skip_n, show_col_types = FALSE))
     
     if (verbose) {
-      cli_alert_info("Columns detected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns detected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     df <- df |>
@@ -658,8 +658,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
              contains("mg/l", ignore.case = TRUE))
     
     if (verbose) {
-      cli_alert_info("Columns selected:")
-      cli_alert_info(paste(names(df), collapse = ", "))
+      cli::cli_alert_info("Columns selected:")
+      cli::cli_alert_info(paste(names(df), collapse = ", "))
     }
     
     df <- df |>
@@ -693,8 +693,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
       select(-date)
     
     if (verbose) {
-      cli_alert_info(paste("Rows after filtering:", nrow(df)))
-      cli_alert_success(paste("Finished processing", file_name))
+      cli::cli_alert_info(paste("Rows after filtering:", nrow(df)))
+      cli::cli_alert_success(paste("Finished processing", file_name))
     }
   }
   
@@ -708,7 +708,7 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     
     # Start at line 10 if search does not work
     if (is.na(data_start)) {
-      cli_alert_warning(paste("Could not detect data start in", file_name, "- defaulting to line 10"))
+      cli::cli_alert_warning(paste("Could not detect data start in", file_name, "- defaulting to line 10"))
       data_start <- 10
     }
     
@@ -717,7 +717,7 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
     
     # Add in the column names, and a warning if there is something missing
     if (ncol(df) < 5) {
-      cli_alert_warning(paste("Unexpected number of columns in PAR file:", file_name))
+      cli::cli_alert_warning(paste("Unexpected number of columns in PAR file:", file_name))
       df <- NULL
     } else {
       names(df)[1:5] <- c("scan_no", "date", "time", "raw_integrating_light", "calibrated_integrating_light")
@@ -740,7 +740,7 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
         distinct()
       
       if (verbose) {
-        cli_alert_info(paste("Rows after filtering:", nrow(df)))
+        cli::cli_alert_info(paste("Rows after filtering:", nrow(df)))
       }
     }
     
@@ -762,8 +762,8 @@ read_and_clean_logger_csv <- function(file_row, metadata, verbose = FALSE) {
       select(-date)
     
     if (verbose) {
-      cli_alert_info(paste("Rows after filtering:", nrow(df)))
-      cli_alert_success(paste("Finished processing", file_name))
+      cli::cli_alert_info(paste("Rows after filtering:", nrow(df)))
+      cli::cli_alert_success(paste("Finished processing", file_name))
     }
     
   }
@@ -784,7 +784,7 @@ first_sunday_nov <- function(year) {
 } # END first_sunday_nov function ----
 
 
-#' Collapse duplicate site/position/datetime rows, but preserve DST "fall-back" duplicates
+#' Collapse duplicate site/position/datetime rows, but preserve DST "fall-back" duplicates AND duplicates from preserving CON deployment and retrieval dates
 #'
 #' Most duplicate site/position/datetime rows (e.g. overlap between an old and
 #' a new processing run) are collapsed to one row, keeping the first
@@ -809,45 +809,113 @@ dedupe_with_fallback <- function(df) {
   
   # Look up the fall-back Sunday once per year present in the data
   yrs <- unique(year(df$datetime))
-  fallback_lookup <- setNames(vapply(yrs, function(y) as.numeric(first_sunday_nov(y)), numeric(1)), yrs)
+  fallback_lookup <- setNames(
+    vapply(
+      yrs,
+      function(y) as.numeric(first_sunday_nov(y)),
+      numeric(1)
+    ),
+    yrs
+  )
   
   df <- df |>
     mutate(
-      fallback_sunday = as.Date(fallback_lookup[as.character(year(datetime))], 
-                                origin = "2015-01-01"),
-      is_fallback_window = date(datetime) == fallback_sunday & hour(datetime) == 1
+      fallback_sunday = as.Date(
+        fallback_lookup[as.character(year(datetime))],
+        origin = "2015-01-01"
+      ),
+      is_fallback_window =
+        date(datetime) == fallback_sunday & hour(datetime) == 1
     ) |>
     select(-fallback_sunday) |>
     add_count(site, position, datetime, name = "n_dupe")
   
-  # De-duplicate everything that isn't a fall-back duplicate
+  # If this is the CON data frame, identify duplicate rows associated
+  # with a deployment/retrieval date.
+  if ("date_flag" %in% names(df)) {
+    df <- df |>
+      mutate(
+        preserve_date_flag_dupe =
+          n_dupe > 1 & !is.na(date_flag)
+      )
+  } else {
+    df <- df |>
+      mutate(
+        preserve_date_flag_dupe = FALSE
+      )
+  }
+  
+  # De-duplicate everything except:
+  # 1. DST fall-back duplicates
+  # 2. CON duplicates with a non-NA date_flag
   others <- df |>
-    filter(!(is_fallback_window & n_dupe > 1)) |>
-    select(-is_fallback_window, -n_dupe) |>
+    filter(
+      !(
+        (is_fallback_window & n_dupe > 1) |
+          preserve_date_flag_dupe
+      )
+    ) |>
+    select(
+      -is_fallback_window,
+      -n_dupe,
+      -preserve_date_flag_dupe
+    ) |>
     group_by(site, position, datetime) |>
-    summarise(across(everything(), ~ first(na.omit(.x))[1]), .groups = "drop")
+    summarise(
+      across(everything(), ~ first(na.omit(.x))[1]),
+      .groups = "drop"
+    )
   
-  # Fall-back duplicates: keep every row, offset datetimes
-  fallback_dupes <- df |>
-    filter(is_fallback_window, n_dupe > 1)
+  # Keep DST fall-back duplicates and CON date_flag duplicates
+  preserved_dupes <- df |>
+    filter(
+      (is_fallback_window & n_dupe > 1) |
+        preserve_date_flag_dupe
+    )
   
-  if (nrow(fallback_dupes) > 0) {
-    fallback_dupes_kept <- fallback_dupes |>
-      select(-is_fallback_window, -n_dupe) |>
+  if (nrow(preserved_dupes) > 0) {
+    
+    # DST duplicates get a small datetime offset
+    fallback_dupes_kept <- preserved_dupes |>
+      filter(is_fallback_window & n_dupe > 1) |>
+      select(
+        -is_fallback_window,
+        -n_dupe,
+        -preserve_date_flag_dupe
+      ) |>
       arrange(site, position, datetime) |>
       group_by(site, position, datetime) |>
       mutate(
         dupe_index = row_number(),
         datetime = datetime + seconds(dupe_index - 1),
-        dst_fallback_note = if_else(dupe_index > 1,
-                                    "Duplicate reading retained - DST fall-back",
-                                    dst_fallback_note)
+        dst_fallback_note = if_else(
+          dupe_index > 1,
+          "Duplicate reading retained - DST fall-back",
+          dst_fallback_note
+        )
       ) |>
       ungroup() |>
       select(-dupe_index)
     
-    result <- bind_rows(others, fallback_dupes_kept) |>
+    # CON date_flag duplicates stay at their original datetime
+    date_flag_dupes_kept <- preserved_dupes |>
+      filter(
+        preserve_date_flag_dupe,
+        !(is_fallback_window & n_dupe > 1)
+      ) |>
+      select(
+        -is_fallback_window,
+        -n_dupe,
+        -preserve_date_flag_dupe
+      )
+    
+    result <- bind_rows(
+      others,
+      fallback_dupes_kept,
+      date_flag_dupes_kept
+    ) |>
       arrange(site, position, datetime)
+    
   } else {
     result <- others
   }
@@ -875,7 +943,7 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
                                            force_reprocess = FALSE,
                                            verbose = FALSE) {
   
-  cli::cli_h1("Incremental logger data update")
+  cli::cli_h1("Logger data update")
   
   # ===== 1. Load associated info from file name and metadata ===== #
   
@@ -1026,6 +1094,13 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
     # Combine new and existing data
     combined_data <- bind_rows(old_data, new_data)
     
+    non_value_cols <- c("site", "position", "logger_id", "logger_type", "datetime",
+                        "issue_flag", "comments", "date_flag", "dst_fallback_note")
+    value_cols <- setdiff(names(combined_data), non_value_cols)
+    
+    combined_data <- combined_data |>
+      filter(if_any(all_of(value_cols), ~ !is.na(.)))
+    
     # Metadata rows for this sensor type only
     meta_this_sensor <- metadata |>
       filter(logger_type == logger_type_value)
@@ -1142,7 +1217,7 @@ update_logger_data_incremental <- function(root_folder_id, metadata_file_url, sh
   # Print unsuccessful files for review
   if (length(unsuccessfully_processed_files) > 0) {
     cli::cli_alert_warning("The following files were not processed and need review:")
-    for (f in unsuccessfully_processed_files) cli_alert_warning(paste(" -", f))
+    for (f in unsuccessfully_processed_files) cli::cli_alert_warning(paste(" -", f))
   }
   
   # Print summary for each sensor type
